@@ -1,4 +1,5 @@
 import express from "express";
+import bcrypt from "bcryptjs";
 import User from "../models/user";
 
 const router = express.Router();
@@ -73,5 +74,42 @@ router.delete("/:id", async (req, res) => {
     res.status(500).json({ message: "Delete failed" });
   }
 });
+
+router.put("/:id", async (req, res) => {
+  try {
+    const { name, email, contactNo, address, password } = req.body;
+
+    const updateData: any = {
+      name,
+      email,
+      contactNo,
+      address,
+    };
+
+    // 🔒 only hash if password provided
+    if (password && password.trim() !== "") {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({
+      message: "User updated successfully",
+      user,
+    });
+  } catch (error) {
+    console.error("Update user error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 export default router;
