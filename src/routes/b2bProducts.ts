@@ -90,6 +90,28 @@ router.get("/", async (_req, res) => {
   res.json(products);
 });
 
+/* ================= UPDATE ================= */
+router.put("/:id", async (req: Request, res: Response) => {
+  try {
+    const { _id, createdAt, updatedAt, ...updateData } = req.body;
+
+    const updated = await B2BProduct.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: "B2B product not found" });
+    }
+
+    res.json(updated);
+  } catch (err: any) {
+    console.error("B2B update error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 /* ================= DELETE ================= */
 router.delete("/:id", async (req, res) => {
   await B2BProduct.findByIdAndDelete(req.params.id);
