@@ -8,9 +8,9 @@ const router = express.Router();
 // CREATE doctor (unchanged)
 router.post("/", async (req: Request<{}, {}, any>, res: Response) => {
   try {
-    const { title, firstName, lastName, specialist, email, password } = req.body;
+    const { title, firstName, lastName, specialist, email, phone, password } = req.body;
 
-    if (!firstName || !lastName || !specialist || !email || !password)
+    if (!firstName || !lastName || !specialist || !email || !phone || !password)
       return res.status(400).json({ msg: "Please provide all required fields." });
 
     const existing = await Doctor.findOne({ email: email.toLowerCase() });
@@ -23,6 +23,7 @@ router.post("/", async (req: Request<{}, {}, any>, res: Response) => {
       lastName,
       specialist,
       email: email.toLowerCase(),
+      phone,
       password: hashed,
       createdByAdmin: true,
     });

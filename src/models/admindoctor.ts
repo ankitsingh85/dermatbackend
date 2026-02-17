@@ -7,6 +7,7 @@ export interface IDoctor extends Document {
   lastName: string;
   specialist: string;
   email: string;
+  phone?: string;
   password: string;
   createdByAdmin: boolean;
   createdAt: Date;
@@ -20,6 +21,7 @@ const DoctorSchema: Schema = new Schema(
     lastName: { type: String, required: true },
     specialist: { type: String, required: true },
     email: { type: String, required: true, unique: true },
+    phone: { type: String, trim: true },
     password: { type: String, required: true },
     createdByAdmin: { type: Boolean, default: true }, // ✅ add this
   },

@@ -32,11 +32,12 @@ export interface IB2BProduct {
   licenseNumber: string;
   mrp: number;
   discountedPrice: number;
-  gst: number;
+  gst: 5 | 12 | 18;
   taxIncluded: boolean;
 
   /* ===== MEDIA ===== */
-  productImages: string;
+  productImages: string[];
+  productVideoUrl: string;
   msds: string;
   customerReviews: string;
   relatedProducts: string;
@@ -76,10 +77,11 @@ const B2BProductSchema = new Schema<B2BProductDocument>(
     licenseNumber: { type: String },
     mrp: { type: Number },
     discountedPrice: { type: Number },
-    gst: { type: Number },
+    gst: { type: Number, enum: [5, 12, 18], default: 5 },
     taxIncluded: { type: Boolean, default: true },
 
-    productImages: { type: String },
+    productImages: [{ type: String }],
+    productVideoUrl: { type: String },
     msds: { type: String },
     customerReviews: { type: String },
     relatedProducts: { type: String },

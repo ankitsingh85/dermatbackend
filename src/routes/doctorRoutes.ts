@@ -13,6 +13,7 @@ router.post("/", async (req, res) => {
       lastName,
       specialist,
       email,
+      phone,
       password,
       description,
     } = req.body;
@@ -23,6 +24,7 @@ router.post("/", async (req, res) => {
       !lastName ||
       !specialist ||
       !email ||
+      !phone ||
       !password
     ) {
       return res.status(400).json({ message: "All required fields missing" });
@@ -43,6 +45,7 @@ router.post("/", async (req, res) => {
       lastName,
       specialist,
       email,
+      phone,
       password: hashedPassword,
       description,
     });

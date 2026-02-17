@@ -7,6 +7,7 @@ export interface IDoctor extends Document {
   lastName: string;
   specialist: string;
   email: string;
+  phone?: string;
   password: string;
   description?: string;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -43,6 +44,11 @@ const DoctorSchema = new Schema<IDoctor>(
       required: true,
       unique: true,
       lowercase: true,
+      trim: true,
+    },
+
+    phone: {
+      type: String,
       trim: true,
     },
 

@@ -34,7 +34,6 @@ const CategorySchema: Schema = new Schema<ICategory>(
     timestamps: true,
     toJSON: {
       transform: (_doc, ret) => {
-        delete ret._id;
         delete ret.__v;
       },
     },

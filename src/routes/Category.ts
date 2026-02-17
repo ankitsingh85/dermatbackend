@@ -38,8 +38,8 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const { name, imageUrl, exploreImage } = req.body;
-    const updated = await Category.findOneAndUpdate(
-      { id: req.params.id },
+    const updated = await Category.findByIdAndUpdate(
+      req.params.id,
       { name, imageUrl, exploreImage },
       { new: true }
     );
@@ -52,7 +52,7 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const deleted = await Category.findOneAndDelete({ id: req.params.id });
+    const deleted = await Category.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ message: "Not found" });
     res.json({ message: "Category deleted" });
   } catch (error: any) {

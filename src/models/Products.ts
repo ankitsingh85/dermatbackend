@@ -33,7 +33,7 @@ export interface IProduct {
   mrpPrice: number;
   discountedPrice: number;
   discountPercent: number;
-  taxIncluded: boolean;
+  taxPercent: number;
 
   /* ===== COMPLIANCE ===== */
   expiryDate: Date;
@@ -44,13 +44,11 @@ export interface IProduct {
   /* ===== MEDIA ===== */
   productImages: string[];
   productShortVideo?: string;
-  howToUseVideo?: string;
 
   /* ===== META ===== */
   gender: string;
   skinHairType: string;
   barcode: string;
-  productURL?: string;
 
   /* ===== SYSTEM CONTROLLED ===== */
   rating: number;
@@ -101,7 +99,7 @@ const ProductSchema = new Schema<ProductDocument>(
     mrpPrice: { type: Number },
     discountedPrice: { type: Number },
     discountPercent: { type: Number },
-    taxIncluded: { type: Boolean, default: true },
+    taxPercent: { type: Number, default: 0 },
 
     expiryDate: { type: Date },
     manufacturerName: { type: String },
@@ -110,12 +108,10 @@ const ProductSchema = new Schema<ProductDocument>(
 
     productImages: { type: [String], default: [] },
     productShortVideo: { type: String },
-    howToUseVideo: { type: String },
 
     gender: { type: String, default: "Unisex" },
     skinHairType: { type: String },
     barcode: { type: String },
-    productURL: { type: String },
 
     rating: { type: Number, default: 0 },
     shippingTime: { type: String, default: "5-7 Business Days" },

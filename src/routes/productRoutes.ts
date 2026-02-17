@@ -6,8 +6,16 @@ const router = express.Router();
 /** ================= CREATE PRODUCT ================= */
 router.post("/", async (req: Request, res: Response) => {
   try {
+    const payload = { ...req.body };
+    if (payload.mrpPrice !== undefined) payload.mrpPrice = Number(payload.mrpPrice);
+    if (payload.discountedPrice !== undefined)
+      payload.discountedPrice = Number(payload.discountedPrice);
+    if (payload.discountPercent !== undefined)
+      payload.discountPercent = Number(payload.discountPercent);
+    if (payload.taxPercent !== undefined) payload.taxPercent = Number(payload.taxPercent);
+
     const product = new Product({
-      ...req.body,
+      ...payload,
       // subCategory: undefined ❌ ignored intentionally
     });
 
@@ -34,10 +42,18 @@ router.get("/:id", async (req, res) => {
 
 /** ================= UPDATE ================= */
 router.put("/:id", async (req, res) => {
+  const payload: any = { ...req.body };
+  if (payload.mrpPrice !== undefined) payload.mrpPrice = Number(payload.mrpPrice);
+  if (payload.discountedPrice !== undefined)
+    payload.discountedPrice = Number(payload.discountedPrice);
+  if (payload.discountPercent !== undefined)
+    payload.discountPercent = Number(payload.discountPercent);
+  if (payload.taxPercent !== undefined) payload.taxPercent = Number(payload.taxPercent);
+
   const updated = await Product.findByIdAndUpdate(
     req.params.id,
     {
-      ...req.body,
+      ...payload,
       // subCategory: undefined ❌ ignored intentionally
     },
     { new: true, runValidators: true }
