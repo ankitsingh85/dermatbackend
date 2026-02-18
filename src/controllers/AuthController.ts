@@ -96,82 +96,88 @@ export const adminLogin = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Login failed" });
   }
 };
-/* ================= USER SIGNUP ================= */
-export const userSignup = async (req: Request, res: Response) => {
+/* ================= USER MOBILE LOGIN ================= */
+export const userMobileLogin = async (req: Request, res: Response) => {
   try {
-    const { name, email, password } = req.body;
+    const { contactNo, name, email } = req.body as {
+      contactNo?: string;
+      name?: string;
+      email?: string;
+    };
 
-    if (!email || !password) {
-      return res
-        .status(400)
-        .json({ message: "Email and password are required" });
+    const normalizedContact = (contactNo || "").replace(/\D/g, "");
+    if (normalizedContact.length !== 10) {
+      return res.status(400).json({ message: "Enter a valid 10 digit mobile number" });
     }
 
-    const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(400).json({ message: "Email already registered" });
-    }
+    let user = await User.findOne({ contactNo: normalizedContact });
 
-    const patientId = "PAT" + Date.now(); // Generate unique patient ID
+    if (user) {
+      const nextName = (name || "").trim();
+      const nextEmail = (email || "").trim().toLowerCase();
+      let shouldUpdate = false;
 
-    const newUser = await User.create({
-      patientId,
-      name,
-      email,
-      password, // 🔐 hashed by model
-    });
+      if (nextEmail && nextEmail !== user.email) {
+        const emailTaken = await User.findOne({
+          email: nextEmail,
+          _id: { $ne: user._id },
+        });
+        if (emailTaken) {
+          return res.status(400).json({ message: "Email already registered with another user" });
+        }
+      }
 
-    const token = generateToken(newUser._id.toString(), "user");
+      if (nextName && nextName !== user.name) {
+        user.name = nextName;
+        shouldUpdate = true;
+      }
+      if (nextEmail && nextEmail !== user.email) {
+        user.email = nextEmail;
+        shouldUpdate = true;
+      }
+      if (shouldUpdate) {
+        await user.save();
+      }
+    } else {
+      const nextName = (name || "").trim();
+      const nextEmail = (email || "").trim().toLowerCase();
 
-    res.status(201).json({
-      message: "User signup successful",
-      token,
-      role: "user",
-      user: {
-        id: newUser._id,
-        name: newUser.name,
-        email: newUser.email,
-      },
-    });
-  } catch (err: any) {
-    console.error("User signup error:", err);
-    res.status(500).json({
-      message: "User signup failed",
-      error: err.message,
-    });
-  }
-};
+      if (!nextName || !nextEmail) {
+        return res.status(400).json({ message: "Name and email are required" });
+      }
 
-/* ================= USER LOGIN ================= */
-export const userLogin = async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
+      const emailTaken = await User.findOne({ email: nextEmail });
+      if (emailTaken) {
+        return res.status(400).json({ message: "Email already registered" });
+      }
 
-    const user = await User.findOne({ email }).select("+password");
-    if (!user) {
-      return res.status(400).json({ message: "Invalid email or password" });
-    }
-
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid email or password" });
+      const patientId = `PAT-${Date.now().toString().slice(-8)}`;
+      user = await User.create({
+        patientId,
+        name: nextName,
+        email: nextEmail,
+        contactNo: normalizedContact,
+      });
     }
 
     const token = generateToken(user._id.toString(), "user");
 
-    res.json({
+    return res.json({
       message: "User login successful",
       token,
       role: "user",
       user: {
         id: user._id,
+        patientId: user.patientId,
         name: user.name,
         email: user.email,
+        contactNo: user.contactNo,
+        profileImage: user.profileImage,
       },
     });
   } catch (err: any) {
-    console.error("User login error:", err);
-    res.status(500).json({
+    console.error("User mobile login error:", err);
+    return res.status(500).json({
       message: "Login failed",
       error: err.message,
     });

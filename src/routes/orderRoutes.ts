@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import Order from "../models/order";
-import UserProfile from "../models/userinformation";
+// import UserProfile from "../models/userinformation";
 
 const router = express.Router();
 
@@ -18,8 +18,8 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "Invalid userId" });
     }
 
-    const user = await UserProfile.findById(userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    // const user = await UserProfile.findById(userId);
+    // if (!user) return res.status(404).json({ message: "User not found" });
 
     const order = new Order({
       userId,

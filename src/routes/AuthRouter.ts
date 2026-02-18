@@ -3,8 +3,7 @@ import { Router } from "express";
 import {
   adminSignup,
   adminLogin,
-  userSignup,
-  userLogin,
+  userMobileLogin,
 } from "../controllers/AuthController";
 
 const router = Router();
@@ -14,7 +13,6 @@ router.post("/admin/signup", adminSignup);
 router.post("/admin/login", adminLogin);
 
 // ------------------ USER ROUTES ------------------
-router.post("/user/signup", userSignup);
-router.post("/user/login", userLogin);
+router.post("/user/mobile-login", userMobileLogin);
 
 export default router; // ✅ important for Express

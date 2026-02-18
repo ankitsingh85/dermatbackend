@@ -7,7 +7,8 @@ export interface IUser extends Document {
   email: string;
   contactNo?: string;
   address?: string;
-  password: string;
+  profileImage?: string;
+  password?: string;
   comparePassword(password: string): Promise<boolean>;
 }
 
@@ -36,6 +37,8 @@ const UserSchema = new Schema<IUser>(
     contactNo: {
       type: String,
       trim: true,
+      unique: true,
+      sparse: true,
     },
 
     address: {
@@ -43,9 +46,13 @@ const UserSchema = new Schema<IUser>(
       trim: true,
     },
 
+    profileImage: {
+      type: String,
+      trim: true,
+    },
+
     password: {
       type: String,
-      required: true,
       select: false, // 🔐 hidden by default
     },
   },
@@ -54,7 +61,7 @@ const UserSchema = new Schema<IUser>(
 
 /* ===== HASH PASSWORD ===== */
 UserSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+  if (!this.isModified("password") || !this.password) return next();
   this.password = await bcrypt.hash(this.password, 10);
   next();
 });
@@ -63,6 +70,7 @@ UserSchema.pre("save", async function (next) {
 UserSchema.methods.comparePassword = async function (
   enteredPassword: string
 ) {
+  if (!this.password) return false;
   return bcrypt.compare(enteredPassword, this.password);
 };
 

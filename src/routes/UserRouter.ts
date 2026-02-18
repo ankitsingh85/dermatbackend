@@ -1,5 +1,4 @@
 import express from "express";
-import bcrypt from "bcryptjs";
 import User from "../models/user";
 
 const router = express.Router();
@@ -13,11 +12,11 @@ router.post("/", async (req, res) => {
       email,
       contactNo,
       address,
-      password, // ✅ NEW
+      profileImage,
     } = req.body;
 
     // ✅ STRICT VALIDATION
-    if (!patientId || !name || !email || !password) {
+    if (!patientId || !name || !email) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
@@ -32,7 +31,7 @@ router.post("/", async (req, res) => {
       email,
       contactNo,
       address,
-      password, // ✅ REQUIRED & HASHED BY MODEL
+      profileImage,
     });
 
     res.status(201).json({
@@ -44,6 +43,7 @@ router.post("/", async (req, res) => {
         email: user.email,
         contactNo: user.contactNo,
         address: user.address,
+        profileImage: user.profileImage,
       },
     });
   } catch (err: any) {
@@ -62,6 +62,20 @@ router.get("/", async (_req, res) => {
   }
 });
 
+/* ================= GET USER BY EMAIL ================= */
+router.get("/by-email/:email", async (req, res) => {
+  try {
+    const email = decodeURIComponent(req.params.email).toLowerCase();
+    const user = await User.findOne({ email }).select("-password");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json(user);
+  } catch {
+    res.status(500).json({ message: "Failed to fetch user" });
+  }
+});
+
 /* ================= DELETE USER ================= */
 router.delete("/:id", async (req, res) => {
   try {
@@ -77,19 +91,15 @@ router.delete("/:id", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   try {
-    const { name, email, contactNo, address, password } = req.body;
+    const { name, email, contactNo, address, profileImage } = req.body;
 
     const updateData: any = {
       name,
       email,
       contactNo,
       address,
+      profileImage,
     };
-
-    // 🔒 only hash if password provided
-    if (password && password.trim() !== "") {
-      updateData.password = await bcrypt.hash(password, 10);
-    }
 
     const user = await User.findByIdAndUpdate(
       req.params.id,
