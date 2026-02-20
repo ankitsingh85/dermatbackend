@@ -22,7 +22,7 @@ const OrderSchema = new Schema<IOrder>(
   {
     userId: {
       type: Schema.Types.ObjectId,
-      ref: "UserProfile", // name of your user model
+      ref: "User",
       required: true,
     },
     products: [
