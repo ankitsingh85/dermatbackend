@@ -31,35 +31,76 @@ import b2bCategoryRoutes from "./routes/b2bCategories";
 import b2bProductRoutes from "./routes/b2bProducts";
 
 dotenv.config();
-
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:8081",
+];
 const server = express();
 
 // -------------------- MIDDLEWARE --------------------
+
+// server.use(
+//   cors({
+//     origin: (origin, callback) => {
+//       // allow server-to-server / same-origin
+//       if (!origin) return callback(null, true);
+
+//       // localhost
+//       if (origin === "http://localhost:3000") {
+//         return callback(null, true);
+//       }
+
+//       // allow ALL vercel deployments
+//       if (origin.endsWith(".vercel.app")) {
+//         return callback(null, true);
+//       }
+
+//       // ❌ DO NOT THROW ERROR
+//       return callback(null, false);
+//     },
+//     credentials: true,
+//     methods: ["GET", "POST", "PUT", "DELETE"],
+//   })
+// );
+
+
 server.use(
   cors({
     origin: (origin, callback) => {
-      // allow server-to-server / same-origin
-      if (!origin) return callback(null, true);
-
-      // localhost
-      if (origin === "http://localhost:3000") {
+      // Allow requests with no origin (mobile apps, Postman)
+      if (!origin) {
+        console.log("✅ Allowed (no origin)");
         return callback(null, true);
       }
-
-      // allow ALL vercel deployments
-      if (origin.endsWith(".vercel.app")) {
+ 
+      // Allow localhost ports
+      if (allowedOrigins.includes(origin)) {
+        console.log("✅ Allowed localhost:", origin);
         return callback(null, true);
       }
-
-      // ❌ DO NOT THROW ERROR
-      return callback(null, false);
+ 
+      // Allow ALL vercel deployments
+      if (/\.vercel\.app$/.test(new URL(origin).hostname)) {
+        console.log("✅ Allowed Vercel:", origin);
+        return callback(null, true);
+      }
+ 
+      // Allow your future live domain (replace with real domain later)
+      if (origin.includes("drdermat")) {
+        console.log("✅ Allowed live domain:", origin);
+        return callback(null, true);
+      }
+ 
+      console.log("❌ Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
     },
+ 
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
-
+server.options("*", cors());
 server.use(express.json({ limit: "100mb" }));
 
 // -------------------- STATIC FILES --------------------
