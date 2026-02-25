@@ -27,6 +27,25 @@ const getUploadedPaths = (
   return files.map((file) => `/uploads/${file.filename}`);
 };
 
+const parseStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === "string");
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
 router.post(
   "/",
   upload.fields([
@@ -79,6 +98,9 @@ router.post(
       const files = req.files as {
         [fieldname: string]: Express.Multer.File[];
       };
+      const uploadedTreatmentImages = getUploadedPaths(files?.treatmentImages);
+      const uploadedBeforeAfter = getUploadedPaths(files?.beforeAfterImages);
+      const uploadedCategoryIcons = getUploadedPaths(files?.categoryIcons);
 
       const created = await TreatmentPlan.create({
         tuc,
@@ -107,9 +129,18 @@ router.post(
         rating: parseNumber(rating),
         reviews,
         patientFeedback,
-        treatmentImages: getUploadedPaths(files?.treatmentImages),
-        beforeAfterImages: getUploadedPaths(files?.beforeAfterImages),
-        categoryIcons: getUploadedPaths(files?.categoryIcons),
+        treatmentImages:
+          uploadedTreatmentImages.length > 0
+            ? uploadedTreatmentImages
+            : parseStringArray(req.body.treatmentImages),
+        beforeAfterImages:
+          uploadedBeforeAfter.length > 0
+            ? uploadedBeforeAfter
+            : parseStringArray(req.body.beforeAfterImages),
+        categoryIcons:
+          uploadedCategoryIcons.length > 0
+            ? uploadedCategoryIcons
+            : parseStringArray(req.body.categoryIcons),
       });
 
       const populated = await TreatmentPlan.findById(created._id).populate(
