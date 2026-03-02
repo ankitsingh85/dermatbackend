@@ -23,6 +23,8 @@ router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
       contactNo: user.contactNo,
       address: user.address,
       addresses: user.addresses || [],
+      cartItems: user.cartItems || [],
+      wishlistItems: user.wishlistItems || [],
       profileImage: user.profileImage,
     });
   } catch (err) {
@@ -119,7 +121,16 @@ router.delete("/:id", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   try {
-    const { name, email, contactNo, address, profileImage, addresses } = req.body;
+    const {
+      name,
+      email,
+      contactNo,
+      address,
+      profileImage,
+      addresses,
+      cartItems,
+      wishlistItems,
+    } = req.body;
 
     const updateData: any = {
       name,
@@ -133,6 +144,12 @@ router.put("/:id", async (req, res) => {
     }
     if (Array.isArray(addresses)) {
       updateData.addresses = addresses;
+    }
+    if (Array.isArray(cartItems)) {
+      updateData.cartItems = cartItems;
+    }
+    if (Array.isArray(wishlistItems)) {
+      updateData.wishlistItems = wishlistItems;
     }
 
     const user = await User.findByIdAndUpdate(

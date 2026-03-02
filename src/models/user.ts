@@ -4,6 +4,26 @@ import bcrypt from "bcryptjs";
 export interface IUserAddress {
   type: string;
   address: string;
+  fullName?: string;
+  mobileNo?: string;
+  houseNo?: string;
+  street?: string;
+  localArea?: string;
+  pincode?: string;
+  district?: string;
+  state?: string;
+}
+
+export interface IUserCartItem {
+  id: string;
+  name: string;
+  price: number;
+  mrp?: number;
+  discount?: string;
+  discountPrice?: number;
+  company?: string;
+  image?: string;
+  quantity?: number;
 }
 
 export interface IUser extends Document {
@@ -13,6 +33,8 @@ export interface IUser extends Document {
   contactNo?: string;
   address?: string;
   addresses?: IUserAddress[];
+  cartItems?: IUserCartItem[];
+  wishlistItems?: IUserCartItem[];
   profileImage?: string; // ✅ BASE64 STRING
   password?: string;
   comparePassword(password: string): Promise<boolean>;
@@ -28,7 +50,41 @@ const UserSchema = new Schema<IUser>(
     addresses: [
       {
         type: { type: String, enum: ["Home", "Work", "Other"], default: "Home" },
-        address: { type: String, required: true },
+        address: { type: String, default: "" },
+        fullName: { type: String, default: "" },
+        mobileNo: { type: String, default: "" },
+        houseNo: { type: String, default: "" },
+        street: { type: String, default: "" },
+        localArea: { type: String, default: "" },
+        pincode: { type: String, default: "" },
+        district: { type: String, default: "" },
+        state: { type: String, default: "" },
+      },
+    ],
+    cartItems: [
+      {
+        id: { type: String, required: true },
+        name: { type: String, required: true },
+        price: { type: Number, required: true, default: 0 },
+        mrp: { type: Number, default: 0 },
+        discount: { type: String, default: "" },
+        discountPrice: { type: Number, default: 0 },
+        company: { type: String, default: "" },
+        image: { type: String, default: "" },
+        quantity: { type: Number, default: 1, min: 1 },
+      },
+    ],
+    wishlistItems: [
+      {
+        id: { type: String, required: true },
+        name: { type: String, required: true },
+        price: { type: Number, required: true, default: 0 },
+        mrp: { type: Number, default: 0 },
+        discount: { type: String, default: "" },
+        discountPrice: { type: Number, default: 0 },
+        company: { type: String, default: "" },
+        image: { type: String, default: "" },
+        quantity: { type: Number, default: 1, min: 1 },
       },
     ],
     profileImage: { type: String }, // BASE64
