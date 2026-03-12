@@ -3,6 +3,7 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface ITreatmentShort extends Document {
   platform: "youtube" | "instagram";
   videoUrl: string;
+  title?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,6 +37,12 @@ const treatmentShortsSchema = new Schema<ITreatmentShort>(
         message: (props: { value: string }) =>
           `Invalid URL format for ${props.value}. Only valid YouTube Shorts or Instagram Reels URLs are allowed.`,
       },
+    },
+    title: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 200,
     },
   },
   { timestamps: true }

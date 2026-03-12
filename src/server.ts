@@ -31,6 +31,7 @@ import treatmentPlansRoutes from "./routes/treatmentplans";
 import orderRoutes from "./routes/orderRoutes";
 import b2bCategoryRoutes from "./routes/b2bCategories";
 import b2bProductRoutes from "./routes/b2bProducts";
+import courseRoutes from "./routes/courseRoutes";
 
 dotenv.config();
 
@@ -99,6 +100,7 @@ server.use("/api/treatment-plans", treatmentPlansRoutes);
 server.use("/api/orders", orderRoutes);
 server.use("/api/b2b-categories", b2bCategoryRoutes);
 server.use("/api/b2b-products", b2bProductRoutes);
+server.use("/api/courses", courseRoutes);
 
 // -------------------- MONGODB CONNECTION --------------------
 mongoose

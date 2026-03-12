@@ -36,15 +36,18 @@ router.put("/", async (req: Request, res: Response) => {
     incoming = incoming.slice(0, MAX_TOP_PRODUCTS);
     while (incoming.length < MAX_TOP_PRODUCTS) incoming.push(null);
 
-    let doc = await TopProductModel.findOne();
-    if (!doc) {
-      doc = new TopProductModel({ products: incoming });
-    } else {
-      doc.products = incoming;
-    }
+    // Atomic update avoids stale __v conflicts during concurrent writes.
+    const doc = await TopProductModel.findOneAndUpdate(
+      {},
+      { $set: { products: incoming } },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
 
-    await doc.save();
-    res.json(doc.products);
+    res.json(doc?.products ?? incoming);
   } catch (err) {
     console.error("Error updating top products:", err);
     res.status(500).json({ error: "Failed to update top products" });
