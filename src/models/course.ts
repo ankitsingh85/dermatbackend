@@ -52,7 +52,11 @@ const CourseSchema = new Schema<CourseDocument>(
     registrationDeadline: { type: Date },
     curriculumTopicsCovered: { type: String, default: "" },
     targetAudience: { type: [String], default: [] },
-    certificationProvided: { type: String, default: "" },
+    certificationProvided: {
+      type: String,
+      enum: ["", "Yes", "No"],
+      default: "",
+    },
     affiliationAccreditation: { type: String, default: "" },
     feesInr: { type: Number, default: 0 },
     applyDiscountVoucher: { type: Boolean, default: false },
