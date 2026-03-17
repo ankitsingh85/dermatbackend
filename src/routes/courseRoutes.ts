@@ -102,17 +102,32 @@ const normalizePayload = (
   payload.location = trimStringField(payload.location);
   payload.currentAvailability = trimStringField(payload.currentAvailability);
   payload.trainerInstructorName = trimStringField(payload.trainerInstructorName);
+  payload.trainerImage = trimStringField(payload.trainerImage);
   payload.trainerExperience = trimStringField(payload.trainerExperience);
   payload.languageOfDelivery = trimStringField(payload.languageOfDelivery);
   payload.whatsIncluded = trimStringField(payload.whatsIncluded);
   payload.whatsNotIncluded = trimStringField(payload.whatsNotIncluded);
   payload.learningOutcomes = trimStringField(payload.learningOutcomes);
+  payload.courseImage = trimStringField(payload.courseImage);
   payload.courseDemoVideo = trimStringField(payload.courseDemoVideo);
   payload.refundCancellationPolicy = trimStringField(payload.refundCancellationPolicy);
   payload.postCourseSupport = trimStringField(payload.postCourseSupport);
+  payload.mobileNo = trimStringField(payload.mobileNo);
   payload.contactForQueries = trimStringField(payload.contactForQueries);
 
   payload.targetAudience = parseStringArray(payload.targetAudience);
+
+  const uploadedCourseImage = getUploadedPaths(files?.courseImage);
+  payload.courseImage =
+    uploadedCourseImage.length > 0
+      ? uploadedCourseImage[0]
+      : trimStringField(payload.courseImage);
+
+  const uploadedTrainerImage = getUploadedPaths(files?.trainerImage);
+  payload.trainerImage =
+    uploadedTrainerImage.length > 0
+      ? uploadedTrainerImage[0]
+      : trimStringField(payload.trainerImage);
 
   const uploadedBrochures = getUploadedPaths(files?.brochurePdfDownload);
   payload.brochurePdfDownload =
@@ -134,7 +149,11 @@ router.get("/next-code", async (_req: Request, res: Response) => {
 
 router.post(
   "/",
-  upload.fields([{ name: "brochurePdfDownload", maxCount: 10 }]),
+  upload.fields([
+    { name: "courseImage", maxCount: 1 },
+    { name: "trainerImage", maxCount: 1 },
+    { name: "brochurePdfDownload", maxCount: 10 },
+  ]),
   async (req: Request, res: Response) => {
     try {
       const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
@@ -195,7 +214,11 @@ router.get("/:id", async (req: Request, res: Response) => {
 
 router.put(
   "/:id",
-  upload.fields([{ name: "brochurePdfDownload", maxCount: 10 }]),
+  upload.fields([
+    { name: "courseImage", maxCount: 1 },
+    { name: "trainerImage", maxCount: 1 },
+    { name: "brochurePdfDownload", maxCount: 10 },
+  ]),
   async (req: Request, res: Response) => {
     try {
       const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;

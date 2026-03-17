@@ -23,15 +23,18 @@ export interface ICourse {
   maximumSeatsBatchSize?: number;
   currentAvailability: string;
   trainerInstructorName: string;
+  trainerImage?: string;
   trainerExperience: string;
   languageOfDelivery: string;
   whatsIncluded: string;
   whatsNotIncluded: string;
   learningOutcomes: string;
+  courseImage?: string;
   courseDemoVideo?: string;
   brochurePdfDownload: string[];
   refundCancellationPolicy: string;
   postCourseSupport: string;
+  mobileNo: string;
   contactForQueries: string;
   createdAt?: Date;
   updatedAt?: Date;
@@ -66,6 +69,7 @@ const CourseSchema = new Schema<CourseDocument>(
     maximumSeatsBatchSize: { type: Number },
     currentAvailability: { type: String, default: "" },
     trainerInstructorName: { type: String, default: "" },
+    trainerImage: { type: String, default: "" },
     trainerExperience: { type: String, default: "" },
     languageOfDelivery: {
       type: String,
@@ -75,10 +79,12 @@ const CourseSchema = new Schema<CourseDocument>(
     whatsIncluded: { type: String, default: "" },
     whatsNotIncluded: { type: String, default: "" },
     learningOutcomes: { type: String, default: "" },
+    courseImage: { type: String, default: "" },
     courseDemoVideo: { type: String, default: "" },
     brochurePdfDownload: { type: [String], default: [] },
     refundCancellationPolicy: { type: String, default: "" },
     postCourseSupport: { type: String, default: "" },
+    mobileNo: { type: String, default: "" },
     contactForQueries: { type: String, default: "" },
   },
   { timestamps: true }
