@@ -1,10 +1,53 @@
 import express from "express";
 import mongoose from "mongoose";
-import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
 import TreatmentPlan from "../models/treatmentplans";
 
 const router = express.Router();
+
+const slugifyTreatmentName = (value: string) => {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+
+  return slug || "treatment-plan-details";
+};
+
+const buildUniqueTreatmentSlug = async (
+  treatmentName: string,
+  excludeId?: string
+) => {
+  const baseSlug = slugifyTreatmentName(treatmentName);
+  let slug = baseSlug;
+  let counter = 2;
+
+  while (
+    await TreatmentPlan.findOne({
+      slug,
+      ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    })
+  ) {
+    slug = `${baseSlug}-${counter}`;
+    counter += 1;
+  }
+
+  return slug;
+};
+
+const ensureTreatmentSlug = async (plan: any) => {
+  if (!plan) return plan;
+  if (plan.slug) return plan;
+
+  plan.slug = await buildUniqueTreatmentSlug(
+    plan.treatmentName || "treatment-plan-details",
+    plan._id?.toString()
+  );
+  await plan.save();
+  return plan;
+};
 
 const parseNumber = (value: unknown) => {
   if (value === undefined || value === null || value === "") return undefined;
@@ -19,13 +62,6 @@ const parseBoolean = (value: unknown, fallback: boolean) => {
     if (value.toLowerCase() === "false") return false;
   }
   return fallback;
-};
-
-const getUploadedPaths = (
-  files: Express.Multer.File[] | undefined
-): string[] => {
-  if (!files || files.length === 0) return [];
-  return files.map((file) => `/uploads/${file.filename}`);
 };
 
 const parseStringArray = (value: unknown): string[] => {
@@ -49,17 +85,12 @@ const parseStringArray = (value: unknown): string[] => {
 
 router.post(
   "/",
-  upload.fields([
-    { name: "treatmentImages", maxCount: 10 },
-    { name: "beforeImages", maxCount: 10 },
-    { name: "afterImages", maxCount: 10 },
-    { name: "categoryIcons", maxCount: 10 },
-  ]),
   async (req, res) => {
     try {
       const {
         tuc,
         treatmentName,
+        slug: incomingSlug,
         clinic,
         description,
         shortReelUrl,
@@ -93,17 +124,15 @@ router.post(
         return res.status(400).json({ message: "Invalid clinic id" });
       }
 
-      const files = req.files as {
-        [fieldname: string]: Express.Multer.File[];
-      };
-      const uploadedTreatmentImages = getUploadedPaths(files?.treatmentImages);
-      const uploadedBeforeImages = getUploadedPaths(files?.beforeImages);
-      const uploadedAfterImages = getUploadedPaths(files?.afterImages);
-      const uploadedCategoryIcons = getUploadedPaths(files?.categoryIcons);
+      const slug =
+        typeof incomingSlug === "string" && incomingSlug.trim()
+          ? incomingSlug.trim()
+          : await buildUniqueTreatmentSlug(treatmentName);
 
       const created = await TreatmentPlan.create({
         tuc,
         treatmentName,
+        slug,
         clinic,
         description,
         shortReelUrl,
@@ -120,22 +149,10 @@ router.post(
         promoCode,
         addToCart: parseBoolean(addToCart, true),
         isActive: parseBoolean(isActive, true),
-        treatmentImages:
-          uploadedTreatmentImages.length > 0
-            ? uploadedTreatmentImages
-            : parseStringArray(req.body.treatmentImages),
-        beforeImages:
-          uploadedBeforeImages.length > 0
-            ? uploadedBeforeImages
-            : parseStringArray(req.body.beforeImages),
-        afterImages:
-          uploadedAfterImages.length > 0
-            ? uploadedAfterImages
-            : parseStringArray(req.body.afterImages),
-        categoryIcons:
-          uploadedCategoryIcons.length > 0
-            ? uploadedCategoryIcons
-            : parseStringArray(req.body.categoryIcons),
+        treatmentImages: parseStringArray(req.body.treatmentImages),
+        beforeImages: parseStringArray(req.body.beforeImages),
+        afterImages: parseStringArray(req.body.afterImages),
+        categoryIcons: parseStringArray(req.body.categoryIcons),
       });
 
       const populated = await TreatmentPlan.findById(created._id).populate(
@@ -164,18 +181,44 @@ router.get("/", async (_req, res) => {
     const plans = await TreatmentPlan.find()
       .populate("clinic", "clinicName email")
       .sort({ createdAt: -1 });
+
+    for (const plan of plans as any[]) {
+      await ensureTreatmentSlug(plan);
+    }
+
     return res.json(plans);
   } catch (error) {
     return res.status(500).json({ message: "Failed to fetch treatment plans" });
   }
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:identifier", async (req, res) => {
   try {
-    const plan = await TreatmentPlan.findById(req.params.id).populate(
+    const identifier = req.params.identifier;
+
+    let plan = await TreatmentPlan.findOne({ slug: identifier }).populate(
       "clinic",
       "clinicName email"
     );
+
+    if (!plan && mongoose.isValidObjectId(identifier)) {
+      plan = await TreatmentPlan.findById(identifier).populate(
+        "clinic",
+        "clinicName email"
+      );
+    }
+
+    if (!plan) {
+      const plans = await TreatmentPlan.find()
+        .populate("clinic", "clinicName email")
+        .sort({ createdAt: -1 });
+      const matched = (plans as any[]).find(
+        (item) =>
+          slugifyTreatmentName(item.treatmentName || "") === identifier
+      );
+      plan = matched || null;
+    }
+
     if (!plan) return res.status(404).json({ message: "Treatment plan not found" });
     return res.json(plan);
   } catch (error) {
@@ -185,21 +228,18 @@ router.get("/:id", async (req, res) => {
 
 router.put(
   "/:id",
-  upload.fields([
-    { name: "treatmentImages", maxCount: 10 },
-    { name: "beforeImages", maxCount: 10 },
-    { name: "afterImages", maxCount: 10 },
-    { name: "categoryIcons", maxCount: 10 },
-  ]),
   async (req, res) => {
     try {
-      const files = req.files as {
-        [fieldname: string]: Express.Multer.File[];
-      };
-
       const payload: Record<string, unknown> = {
         ...req.body,
       };
+
+      if (typeof payload.treatmentName === "string") {
+        payload.slug = await buildUniqueTreatmentSlug(
+          payload.treatmentName,
+          req.params.id
+        );
+      }
 
       if (payload.clinic) {
         if (!mongoose.isValidObjectId(String(payload.clinic))) {
@@ -228,22 +268,17 @@ router.put(
         payload.isActive = parseBoolean(payload.isActive, true);
       }
 
-      const uploadedTreatmentImages = getUploadedPaths(files?.treatmentImages);
-      const uploadedBeforeImages = getUploadedPaths(files?.beforeImages);
-      const uploadedAfterImages = getUploadedPaths(files?.afterImages);
-      const uploadedCategoryIcons = getUploadedPaths(files?.categoryIcons);
-
-      if (uploadedTreatmentImages.length > 0) {
-        payload.treatmentImages = uploadedTreatmentImages;
+      if (payload.treatmentImages !== undefined) {
+        payload.treatmentImages = parseStringArray(payload.treatmentImages);
       }
-      if (uploadedBeforeImages.length > 0) {
-        payload.beforeImages = uploadedBeforeImages;
+      if (payload.beforeImages !== undefined) {
+        payload.beforeImages = parseStringArray(payload.beforeImages);
       }
-      if (uploadedAfterImages.length > 0) {
-        payload.afterImages = uploadedAfterImages;
+      if (payload.afterImages !== undefined) {
+        payload.afterImages = parseStringArray(payload.afterImages);
       }
-      if (uploadedCategoryIcons.length > 0) {
-        payload.categoryIcons = uploadedCategoryIcons;
+      if (payload.categoryIcons !== undefined) {
+        payload.categoryIcons = parseStringArray(payload.categoryIcons);
       }
 
       const updated = await TreatmentPlan.findByIdAndUpdate(

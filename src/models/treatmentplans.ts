@@ -3,6 +3,7 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface ITreatmentPlan extends Document {
   tuc: string;
   treatmentName: string;
+  slug?: string;
   clinic: mongoose.Types.ObjectId;
   description?: string;
   treatmentImages: string[];
@@ -29,6 +30,7 @@ const TreatmentPlanSchema = new Schema<ITreatmentPlan>(
   {
     tuc: { type: String, required: true, unique: true },
     treatmentName: { type: String, required: true, trim: true },
+    slug: { type: String, unique: true, sparse: true, trim: true },
     clinic: { type: Schema.Types.ObjectId, ref: "Clinic", required: true },
     description: { type: String, default: "" },
 
