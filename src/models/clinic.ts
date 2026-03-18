@@ -10,6 +10,7 @@ export interface IClinic extends Document {
   cuc: string;
 
   clinicName: string;
+  slug?: string;
   clinicType?: string;
   ownerName?: string;
   website?: string;
@@ -72,6 +73,7 @@ const ClinicSchema = new Schema<IClinic>(
     cuc: { type: String, required: true, unique: true },
 
     clinicName: { type: String, required: true },
+    slug: { type: String, unique: true, sparse: true, trim: true },
     clinicType: String,
     ownerName: String,
     website: String,
