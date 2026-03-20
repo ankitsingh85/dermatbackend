@@ -2,11 +2,13 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export interface IOrder extends Document {
   userId: mongoose.Types.ObjectId;
+  orderType: "product" | "treatment";
   products: {
     id: string;
     name: string;
     quantity: number;
     price: number;
+    image?: string;
   }[];
   totalAmount: number;
   address: {
@@ -25,12 +27,19 @@ const OrderSchema = new Schema<IOrder>(
       ref: "User",
       required: true,
     },
+    orderType: {
+      type: String,
+      enum: ["product", "treatment"],
+      default: "product",
+      index: true,
+    },
     products: [
       {
         id: { type: String, required: true },
         name: { type: String, required: true },
         quantity: { type: Number, required: true },
         price: { type: Number, required: true },
+        image: { type: String },
       },
     ],
     totalAmount: {

@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import mongoose from "mongoose";
+import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
 
@@ -49,9 +50,100 @@ const ensureClinicSlug = async (clinic: any) => {
   return clinic;
 };
 
-/* ================= CREATE CLINIC ================= */
-router.post("/", async (req: Request, res: Response) => {
+const generateClinicCuc = async () => {
+  let cuc = "";
+  do {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+    cuc = `CUC-${suffix}`;
+  } while (await Clinic.findOne({ cuc }));
+  return cuc;
+};
+
+const parseStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      return trimmed
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+};
+
+const parseDoctors = (value: unknown) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return [];
+
   try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] => {
+  if (!files || files.length === 0) return [];
+  return files.map((file) => `/uploads/${file.filename}`);
+};
+
+const stripHeavyClinicFields = (clinic: any) => {
+  const clone =
+    typeof clinic?.toObject === "function" ? clinic.toObject() : { ...clinic };
+
+  if (typeof clone.clinicLogo === "string" && clone.clinicLogo.startsWith("data:")) {
+    clone.clinicLogo = "";
+  }
+  if (typeof clone.bannerImage === "string" && clone.bannerImage.startsWith("data:")) {
+    clone.bannerImage = "";
+  }
+  if (Array.isArray(clone.photos)) {
+    clone.photos = clone.photos.filter(
+      (item: string) => typeof item === "string" && !item.startsWith("data:")
+    );
+  }
+  return clone;
+};
+
+/* ================= CREATE CLINIC ================= */
+router.post(
+  "/",
+  upload.fields([
+    { name: "clinicLogo", maxCount: 1 },
+    { name: "bannerImage", maxCount: 1 },
+    { name: "rateCard", maxCount: 1 },
+    { name: "specialOffers", maxCount: 20 },
+    { name: "photos", maxCount: 20 },
+    { name: "certifications", maxCount: 20 },
+  ]),
+  async (req: Request, res: Response) => {
+  try {
+    const files = req.files as
+      | {
+          [fieldname: string]: Express.Multer.File[];
+        }
+      | undefined;
+
     const {
       cuc,
       clinicName,
@@ -59,10 +151,11 @@ router.post("/", async (req: Request, res: Response) => {
       address,
       email,
       doctors,
+      videos,
       ...rest
     } = req.body;
 
-    if (!cuc || !clinicName || !dermaCategory || !address || !email) {
+    if (!clinicName || !dermaCategory || !address || !email) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
@@ -71,20 +164,37 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid clinic category" });
     }
 
-    const exists = await Clinic.findOne({ cuc });
-    if (exists) {
-      return res.status(400).json({ message: "Clinic already exists" });
-    }
+    const requestedCuc = typeof cuc === "string" ? cuc.trim() : "";
+    const nextCuc =
+      requestedCuc && !(await Clinic.findOne({ cuc: requestedCuc }))
+        ? requestedCuc
+        : await generateClinicCuc();
+
+    const parsedDoctors = parseDoctors(doctors);
+
+    const uploadedClinicLogo = getUploadedPaths(files?.clinicLogo);
+    const uploadedBannerImage = getUploadedPaths(files?.bannerImage);
+    const uploadedRateCard = getUploadedPaths(files?.rateCard);
+    const uploadedSpecialOffers = getUploadedPaths(files?.specialOffers);
+    const uploadedPhotos = getUploadedPaths(files?.photos);
+    const uploadedCertifications = getUploadedPaths(files?.certifications);
 
     const clinic = await Clinic.create({
-      cuc,
-      clinicName,
-      slug: await buildUniqueClinicSlug(clinicName),
+      cuc: nextCuc,
+      clinicName: String(clinicName).trim(),
+      slug: await buildUniqueClinicSlug(String(clinicName).trim()),
       dermaCategory,
-      address,
-      email,
-      doctors,
-      ...rest, // UI-only fields are safely ignored
+      address: String(address).trim(),
+      email: String(email).trim(),
+      doctors: parsedDoctors,
+      clinicLogo: uploadedClinicLogo[0] || undefined,
+      bannerImage: uploadedBannerImage[0] || undefined,
+      rateCard: uploadedRateCard,
+      specialOffers: uploadedSpecialOffers,
+      photos: uploadedPhotos,
+      certifications: uploadedCertifications,
+      videos: parseStringArray(videos),
+      ...rest,
     });
 
     res.status(201).json({
@@ -98,15 +208,29 @@ router.post("/", async (req: Request, res: Response) => {
       error: err.message,
     });
   }
-});
+  }
+);
 
 /* ================= GET ALL CLINICS ================= */
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
+    const lightMode = String(req.query.light || "").toLowerCase() === "true";
+    if (lightMode) {
+      const clinics = await Clinic.find()
+        .select(
+          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus doctors clinicLogo bannerImage photos createdAt updatedAt"
+        )
+        .populate("dermaCategory", "name")
+        .lean();
+
+      return res.json(clinics.map(stripHeavyClinicFields));
+    }
+
     const clinics = await Clinic.find().populate("dermaCategory", "name");
     for (const clinic of clinics) {
       await ensureClinicSlug(clinic);
     }
+
     res.json(clinics);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch clinics" });

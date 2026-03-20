@@ -5,10 +5,38 @@ import Order from "../models/order";
 
 const router = express.Router();
 
+const normalizeOrderType = (value: unknown) => {
+  const next = String(value || "").toLowerCase();
+  return next === "treatment" ? "treatment" : "product";
+};
+
+const isLegacyTreatmentOrder = (order: any) => {
+  const type = String(order?.address?.type || "").toLowerCase();
+  const addressText = String(order?.address?.address || "").toLowerCase().trim();
+  return (
+    type === "other" ||
+    addressText.includes("treatment booking") ||
+    addressText.includes("treatment")
+  );
+};
+
+const matchesOrderType = (order: any, requestedType?: string) => {
+  if (!requestedType) return true;
+
+  const normalized = normalizeOrderType(requestedType);
+  const orderType = normalizeOrderType(order?.orderType);
+
+  if (normalized === "treatment") {
+    return orderType === "treatment" || isLegacyTreatmentOrder(order);
+  }
+
+  return orderType !== "treatment" && !isLegacyTreatmentOrder(order);
+};
+
 /** ✅ Create new order */
 router.post("/", async (req, res) => {
   try {
-    const { userId, products, totalAmount, address } = req.body;
+    const { userId, products, totalAmount, address, orderType } = req.body;
 
     if (!userId || !products || !totalAmount || !address) {
       return res.status(400).json({ message: "All fields are required" });
@@ -26,6 +54,7 @@ router.post("/", async (req, res) => {
       products,
       totalAmount,
       address,
+      orderType: normalizeOrderType(orderType),
       paymentStatus: "success",
     });
 
@@ -42,6 +71,7 @@ router.post("/", async (req, res) => {
 router.get("/my", async (req, res) => {
   try {
     const userId = req.headers["x-user-id"] as string;
+    const requestedType = req.query.orderType as string | undefined;
 
     if (!userId) {
       return res.status(401).json({ message: "User ID missing" });
@@ -55,7 +85,9 @@ router.get("/my", async (req, res) => {
       .populate("userId", "name email")
       .sort({ createdAt: -1 });
 
-    return res.status(200).json(orders);
+    return res
+      .status(200)
+      .json(requestedType ? orders.filter((order) => matchesOrderType(order, requestedType)) : orders);
   } catch (err: any) {
     console.error("❌ Error fetching orders:", err.message);
     return res.status(500).json({ message: "Failed to fetch orders", error: err.message });
@@ -65,11 +97,14 @@ router.get("/my", async (req, res) => {
 /** ✅ ADMIN: Get all orders (from all users) */
 router.get("/all", async (_req, res) => {
   try {
+    const requestedType = _req.query.orderType as string | undefined;
     const orders = await Order.find()
       .populate("userId", "name email image")
       .sort({ createdAt: -1 });
 
-    res.status(200).json(orders);
+    res
+      .status(200)
+      .json(requestedType ? orders.filter((order) => matchesOrderType(order, requestedType)) : orders);
   } catch (err: any) {
     console.error("❌ Error fetching all orders:", err.message);
     res.status(500).json({ message: "Failed to fetch all orders", error: err.message });
