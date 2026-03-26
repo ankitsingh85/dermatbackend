@@ -10,6 +10,13 @@ const normalizeOrderType = (value: unknown) => {
   return next === "treatment" ? "treatment" : "product";
 };
 
+const hasItemType = (order: any, itemType: "product" | "treatment") => {
+  const products = Array.isArray(order?.products) ? order.products : [];
+  return products.some(
+    (item: any) => String(item?.itemType || "").toLowerCase() === itemType
+  );
+};
+
 const isLegacyTreatmentOrder = (order: any) => {
   const type = String(order?.address?.type || "").toLowerCase();
   const addressText = String(order?.address?.address || "").toLowerCase().trim();
@@ -27,10 +34,19 @@ const matchesOrderType = (order: any, requestedType?: string) => {
   const orderType = normalizeOrderType(order?.orderType);
 
   if (normalized === "treatment") {
-    return orderType === "treatment" || isLegacyTreatmentOrder(order);
+    return (
+      orderType === "treatment" ||
+      hasItemType(order, "treatment") ||
+      isLegacyTreatmentOrder(order)
+    );
   }
 
-  return orderType !== "treatment" && !isLegacyTreatmentOrder(order);
+  return (
+    hasItemType(order, "product") ||
+    (orderType !== "treatment" &&
+      !isLegacyTreatmentOrder(order) &&
+      !hasItemType(order, "treatment"))
+  );
 };
 
 /** ✅ Create new order */

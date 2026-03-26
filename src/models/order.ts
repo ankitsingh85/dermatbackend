@@ -9,6 +9,7 @@ export interface IOrder extends Document {
     quantity: number;
     price: number;
     image?: string;
+    itemType?: "product" | "treatment";
   }[];
   totalAmount: number;
   address: {
@@ -40,6 +41,7 @@ const OrderSchema = new Schema<IOrder>(
         quantity: { type: Number, required: true },
         price: { type: Number, required: true },
         image: { type: String },
+        itemType: { type: String, enum: ["product", "treatment"], default: "product" },
       },
     ],
     totalAmount: {

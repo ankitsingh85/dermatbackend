@@ -73,33 +73,6 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// ✅ Upload/replace explore image
-router.put("/explore-image/:id", async (req, res) => {
-  try {
-    const { exploreImage } = req.body;
-    if (!exploreImage) {
-      return res.status(400).json({ message: "Explore image is required" });
-    }
-
-    const updated = await ClinicCategory.findByIdAndUpdate(
-      req.params.id,
-      { exploreImage }, // ✅ replaces old image
-      { new: true }
-    );
-
-    if (!updated)
-      return res.status(404).json({ message: "Category not found" });
-
-    res.json({
-      message: "Explore image updated successfully",
-      exploreImage: updated.exploreImage,
-    });
-  } catch (error) {
-    console.error("Error updating explore image:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
 // ✅ Delete category
 router.delete("/:id", async (req, res) => {
   try {

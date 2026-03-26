@@ -7,7 +7,7 @@ const router = express.Router();
 router.get("/", async (_req, res) => {
   try {
     const categories = await Category.find({})
-      .select("id name imageUrl exploreImage")
+      .select("id name imageUrl")
       .lean();
 
     res.json(categories);
@@ -19,7 +19,7 @@ router.get("/", async (_req, res) => {
 /* ================= CREATE ================= */
 router.post("/", async (req, res) => {
   try {
-    const { name, imageUrl, exploreImage } = req.body;
+    const { name, imageUrl } = req.body;
     if (!name || !imageUrl) {
       return res.status(400).json({ message: "name and imageUrl required" });
     }
@@ -35,7 +35,6 @@ router.post("/", async (req, res) => {
       id: newId,
       name,
       imageUrl,
-      exploreImage: exploreImage || null,
     });
 
     await category.save();
@@ -48,11 +47,11 @@ router.post("/", async (req, res) => {
 /* ================= UPDATE ================= */
 router.put("/:mongoId", async (req, res) => {
   try {
-    const { name, imageUrl, exploreImage } = req.body;
+    const { name, imageUrl } = req.body;
 
     const updated = await Category.findByIdAndUpdate(
       req.params.mongoId,
-      { name, imageUrl, exploreImage },
+      { name, imageUrl },
       { new: true }
     );
 
