@@ -17,7 +17,7 @@ import doctorRoutes from "./routes/doctorRoutes";
 import editClinicRoutes from "./routes/EditClinicRoutes";
 import serviceRoutes from "./routes/serviceRoutes";
 import offer1Routes from "./routes/productOfferRoutes";
-import offer2Routes from "./routes/offer2Routes";
+import offer2Routes from "./routes/treatmentOfferRoutes";
 import offer3Routes from "./routes/clinicOfferRoutes";
 import doctorAdminRoutes from "./routes/admindoctorRoutes";
 import serviceCategoryRoutes from "./routes/serviceCategoryRoutes";
