@@ -22,6 +22,11 @@ const getUploadedPath = (file: Express.Multer.File | undefined) => {
   return `/uploads/${file.filename}`;
 };
 
+const getUploadedPaths = (files: Express.Multer.File[] | undefined) => {
+  if (!files?.length) return [];
+  return files.map((file) => `/uploads/${file.filename}`);
+};
+
 /* ================= GET CURRENT USER (ME) ================= */
 router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
   try {
@@ -43,6 +48,8 @@ router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
       addresses: user.addresses || [],
       cartItems: user.cartItems || [],
       wishlistItems: user.wishlistItems || [],
+      resultGallery: user.resultGallery || [],
+      prescriptions: user.prescriptions || [],
       profileImage: user.profileImage,
     });
   } catch (err) {
@@ -122,6 +129,167 @@ router.get("/by-email/:email", async (req, res) => {
     res.json(user);
   } catch {
     res.status(500).json({ message: "Failed to fetch user" });
+  }
+});
+
+/* ================= GET USER BY ID ================= */
+router.get("/:id", async (req, res, next) => {
+  if (
+    req.params.id === "me" ||
+    req.params.id === "by-email" ||
+    req.params.id === "upload-prescription" ||
+    req.params.id === "upload-report"
+  ) {
+    return next();
+  }
+
+  try {
+    const user = await User.findById(req.params.id).select("-password");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json(user);
+  } catch {
+    res.status(500).json({ message: "Failed to fetch user" });
+  }
+});
+
+/* ================= UPLOAD RESULT GALLERY ================= */
+router.post(
+  "/:id/result-gallery",
+  upload.fields([
+    { name: "beforeImage", maxCount: 1 },
+    { name: "afterImage", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const { title, note } = req.body;
+      const files = req.files as
+        | {
+            beforeImage?: Express.Multer.File[];
+            afterImage?: Express.Multer.File[];
+          }
+        | undefined;
+
+      const beforeImage = getUploadedPath(files?.beforeImage?.[0]);
+      const afterImage = getUploadedPath(files?.afterImage?.[0]);
+
+      if (!beforeImage && !afterImage) {
+        return res.status(400).json({
+          message: "At least one image is required",
+        });
+      }
+
+      const user = await User.findById(req.params.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      user.resultGallery = user.resultGallery || [];
+      user.resultGallery.unshift({
+        title: String(title || "").trim(),
+        note: String(note || "").trim(),
+        beforeImage: beforeImage || "",
+        afterImage: afterImage || "",
+        uploadedAt: new Date(),
+      });
+
+      await user.save();
+
+      res.status(201).json({
+        message: "Gallery item uploaded successfully",
+        resultGallery: user.resultGallery,
+      });
+    } catch (err: any) {
+      console.error("Upload gallery error:", err);
+      res.status(500).json({ message: "Failed to upload gallery item" });
+    }
+  }
+);
+
+/* ================= DELETE RESULT GALLERY ITEM ================= */
+router.delete("/:id/result-gallery/:itemId", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.resultGallery = (user.resultGallery || []).filter(
+      (item: any) => item?._id?.toString() !== req.params.itemId
+    );
+    await user.save();
+
+    res.json({
+      message: "Gallery item deleted successfully",
+      resultGallery: user.resultGallery,
+    });
+  } catch (err: any) {
+    console.error("Delete gallery error:", err);
+    res.status(500).json({ message: "Failed to delete gallery item" });
+  }
+});
+
+/* ================= UPLOAD PRESCRIPTION PDF ================= */
+router.post(
+  "/:id/prescriptions",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "Prescription PDF is required" });
+      }
+
+      if (req.file.mimetype !== "application/pdf") {
+        return res.status(400).json({ message: "Only PDF files are allowed" });
+      }
+
+      const user = await User.findById(req.params.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      user.prescriptions = user.prescriptions || [];
+      user.prescriptions.unshift({
+        fileName: req.file.originalname,
+        fileUrl: getUploadedPath(req.file) || "",
+        fileType: req.file.mimetype,
+        uploadedAt: new Date(),
+      });
+
+      await user.save();
+
+      res.status(201).json({
+        message: "Prescription uploaded successfully",
+        prescriptions: user.prescriptions,
+      });
+    } catch (err: any) {
+      console.error("Upload prescription error:", err);
+      res.status(500).json({ message: "Failed to upload prescription" });
+    }
+  }
+);
+
+/* ================= DELETE PRESCRIPTION ================= */
+router.delete("/:id/prescriptions/:itemId", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.prescriptions = (user.prescriptions || []).filter(
+      (item: any) => item?._id?.toString() !== req.params.itemId
+    );
+    await user.save();
+
+    res.json({
+      message: "Prescription deleted successfully",
+      prescriptions: user.prescriptions,
+    });
+  } catch (err: any) {
+    console.error("Delete prescription error:", err);
+    res.status(500).json({ message: "Failed to delete prescription" });
   }
 });
 

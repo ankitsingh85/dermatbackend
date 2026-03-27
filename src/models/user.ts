@@ -26,6 +26,23 @@ export interface IUserCartItem {
   quantity?: number;
 }
 
+export interface IUserResultGalleryItem {
+  _id?: string;
+  title?: string;
+  note?: string;
+  beforeImage?: string;
+  afterImage?: string;
+  uploadedAt?: Date;
+}
+
+export interface IUserPrescriptionItem {
+  _id?: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  uploadedAt?: Date;
+}
+
 export interface IUser extends Document {
   patientId: string;
   name: string;
@@ -35,6 +52,8 @@ export interface IUser extends Document {
   addresses?: IUserAddress[];
   cartItems?: IUserCartItem[];
   wishlistItems?: IUserCartItem[];
+  resultGallery?: IUserResultGalleryItem[];
+  prescriptions?: IUserPrescriptionItem[];
   profileImage?: string; // uploaded file path or legacy string
   password?: string;
   comparePassword(password: string): Promise<boolean>;
@@ -85,6 +104,23 @@ const UserSchema = new Schema<IUser>(
         company: { type: String, default: "" },
         image: { type: String, default: "" },
         quantity: { type: Number, default: 1, min: 1 },
+      },
+    ],
+    resultGallery: [
+      {
+        title: { type: String, default: "" },
+        note: { type: String, default: "" },
+        beforeImage: { type: String, default: "" },
+        afterImage: { type: String, default: "" },
+        uploadedAt: { type: Date, default: () => new Date() },
+      },
+    ],
+    prescriptions: [
+      {
+        fileName: { type: String, required: true },
+        fileUrl: { type: String, required: true },
+        fileType: { type: String, default: "application/pdf" },
+        uploadedAt: { type: Date, default: () => new Date() },
       },
     ],
     profileImage: { type: String },
