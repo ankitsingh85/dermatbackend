@@ -1,5 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
+import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
 import TreatmentPlan from "../models/treatmentplans";
 
@@ -83,10 +84,27 @@ const parseStringArray = (value: unknown): string[] => {
   return [];
 };
 
+const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] => {
+  if (!files || files.length === 0) return [];
+  return files.map((file) => `/uploads/${file.filename}`);
+};
+
 router.post(
   "/",
+  upload.fields([
+    { name: "treatmentImages", maxCount: 20 },
+    { name: "beforeImages", maxCount: 20 },
+    { name: "afterImages", maxCount: 20 },
+    { name: "categoryIcons", maxCount: 20 },
+  ]),
   async (req, res) => {
     try {
+      const files = req.files as
+        | {
+            [fieldname: string]: Express.Multer.File[];
+          }
+        | undefined;
+
       const {
         tuc,
         treatmentName,
@@ -149,10 +167,22 @@ router.post(
         promoCode,
         addToCart: parseBoolean(addToCart, true),
         isActive: parseBoolean(isActive, true),
-        treatmentImages: parseStringArray(req.body.treatmentImages),
-        beforeImages: parseStringArray(req.body.beforeImages),
-        afterImages: parseStringArray(req.body.afterImages),
-        categoryIcons: parseStringArray(req.body.categoryIcons),
+        treatmentImages:
+          getUploadedPaths(files?.treatmentImages).length > 0
+            ? getUploadedPaths(files?.treatmentImages)
+            : parseStringArray(req.body.treatmentImages),
+        beforeImages:
+          getUploadedPaths(files?.beforeImages).length > 0
+            ? getUploadedPaths(files?.beforeImages)
+            : parseStringArray(req.body.beforeImages),
+        afterImages:
+          getUploadedPaths(files?.afterImages).length > 0
+            ? getUploadedPaths(files?.afterImages)
+            : parseStringArray(req.body.afterImages),
+        categoryIcons:
+          getUploadedPaths(files?.categoryIcons).length > 0
+            ? getUploadedPaths(files?.categoryIcons)
+            : parseStringArray(req.body.categoryIcons),
       });
 
       const populated = await TreatmentPlan.findById(created._id).populate(
@@ -228,8 +258,20 @@ router.get("/:identifier", async (req, res) => {
 
 router.put(
   "/:id",
+  upload.fields([
+    { name: "treatmentImages", maxCount: 20 },
+    { name: "beforeImages", maxCount: 20 },
+    { name: "afterImages", maxCount: 20 },
+    { name: "categoryIcons", maxCount: 20 },
+  ]),
   async (req, res) => {
     try {
+      const files = req.files as
+        | {
+            [fieldname: string]: Express.Multer.File[];
+          }
+        | undefined;
+
       const payload: Record<string, unknown> = {
         ...req.body,
       };
@@ -268,16 +310,32 @@ router.put(
         payload.isActive = parseBoolean(payload.isActive, true);
       }
 
-      if (payload.treatmentImages !== undefined) {
+      const uploadedTreatmentImages = getUploadedPaths(files?.treatmentImages);
+      const uploadedBeforeImages = getUploadedPaths(files?.beforeImages);
+      const uploadedAfterImages = getUploadedPaths(files?.afterImages);
+      const uploadedCategoryIcons = getUploadedPaths(files?.categoryIcons);
+
+      if (uploadedTreatmentImages.length > 0) {
+        payload.treatmentImages = uploadedTreatmentImages;
+      } else if (payload.treatmentImages !== undefined) {
         payload.treatmentImages = parseStringArray(payload.treatmentImages);
       }
-      if (payload.beforeImages !== undefined) {
+
+      if (uploadedBeforeImages.length > 0) {
+        payload.beforeImages = uploadedBeforeImages;
+      } else if (payload.beforeImages !== undefined) {
         payload.beforeImages = parseStringArray(payload.beforeImages);
       }
-      if (payload.afterImages !== undefined) {
+
+      if (uploadedAfterImages.length > 0) {
+        payload.afterImages = uploadedAfterImages;
+      } else if (payload.afterImages !== undefined) {
         payload.afterImages = parseStringArray(payload.afterImages);
       }
-      if (payload.categoryIcons !== undefined) {
+
+      if (uploadedCategoryIcons.length > 0) {
+        payload.categoryIcons = uploadedCategoryIcons;
+      } else if (payload.categoryIcons !== undefined) {
         payload.categoryIcons = parseStringArray(payload.categoryIcons);
       }
 

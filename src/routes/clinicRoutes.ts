@@ -265,12 +265,28 @@ router.get("/:id", async (req, res) => {
 });
 
 /* ================= UPDATE CLINIC ================= */
-router.put("/:id", async (req, res) => {
+router.put(
+  "/:id",
+  upload.fields([
+    { name: "clinicLogo", maxCount: 1 },
+    { name: "bannerImage", maxCount: 1 },
+    { name: "rateCard", maxCount: 1 },
+    { name: "specialOffers", maxCount: 20 },
+    { name: "photos", maxCount: 20 },
+    { name: "certifications", maxCount: 20 },
+  ]),
+  async (req, res) => {
   try {
     const existingClinic = await Clinic.findById(req.params.id);
     if (!existingClinic) {
       return res.status(404).json({ message: "Clinic not found" });
     }
+
+    const files = req.files as
+      | {
+          [fieldname: string]: Express.Multer.File[];
+        }
+      | undefined;
 
     const nextClinicName =
       typeof req.body?.clinicName === "string" && req.body.clinicName.trim()
@@ -282,11 +298,24 @@ router.put("/:id", async (req, res) => {
       existingClinic._id.toString()
     );
 
+    const uploadedClinicLogo = getUploadedPaths(files?.clinicLogo);
+    const uploadedBannerImage = getUploadedPaths(files?.bannerImage);
+    const uploadedRateCard = getUploadedPaths(files?.rateCard);
+    const uploadedSpecialOffers = getUploadedPaths(files?.specialOffers);
+    const uploadedPhotos = getUploadedPaths(files?.photos);
+    const uploadedCertifications = getUploadedPaths(files?.certifications);
+
     const updated = await Clinic.findByIdAndUpdate(
       req.params.id,
       {
         ...req.body,
         slug: nextSlug,
+        ...(uploadedClinicLogo.length ? { clinicLogo: uploadedClinicLogo[0] } : {}),
+        ...(uploadedBannerImage.length ? { bannerImage: uploadedBannerImage[0] } : {}),
+        ...(uploadedRateCard.length ? { rateCard: uploadedRateCard } : {}),
+        ...(uploadedSpecialOffers.length ? { specialOffers: uploadedSpecialOffers } : {}),
+        ...(uploadedPhotos.length ? { photos: uploadedPhotos } : {}),
+        ...(uploadedCertifications.length ? { certifications: uploadedCertifications } : {}),
       },
       { new: true }
     ).populate("dermaCategory", "name");
@@ -295,7 +324,8 @@ router.put("/:id", async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: "Failed to update clinic" });
   }
-});
+  }
+);
 
 /* ================= DELETE CLINIC ================= */
 router.delete("/:id", async (req, res) => {

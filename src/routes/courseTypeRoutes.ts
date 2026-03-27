@@ -1,5 +1,6 @@
 import express from "express";
 import CourseType from "../models/courseType";
+import upload from "../middleware/uploads";
 
 const router = express.Router();
 
@@ -16,11 +17,14 @@ router.get("/", async (_req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", upload.single("imageUrl"), async (req, res) => {
   try {
-    const { name, imageUrl } = req.body;
+    const { name } = req.body;
+    const uploadedImageUrl = req.file ? `/uploads/${req.file.filename}` : "";
+    const legacyImageUrl =
+      typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
 
-    if (!name?.trim() || !imageUrl?.trim()) {
+    if (!name?.trim() || (!uploadedImageUrl && !legacyImageUrl)) {
       return res.status(400).json({ message: "name and imageUrl required" });
     }
 
@@ -42,7 +46,7 @@ router.post("/", async (req, res) => {
     const courseType = new CourseType({
       id: newId,
       name: String(name).trim(),
-      imageUrl: String(imageUrl).trim(),
+      imageUrl: uploadedImageUrl || legacyImageUrl,
     });
 
     await courseType.save();
@@ -52,9 +56,12 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:mongoId", async (req, res) => {
+router.put("/:mongoId", upload.single("imageUrl"), async (req, res) => {
   try {
-    const { name, imageUrl } = req.body;
+    const { name } = req.body;
+    const uploadedImageUrl = req.file ? `/uploads/${req.file.filename}` : "";
+    const legacyImageUrl =
+      typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
 
     if (!name?.trim()) {
       return res.status(400).json({ message: "Course type name is required" });
@@ -69,12 +76,17 @@ router.put("/:mongoId", async (req, res) => {
       return res.status(409).json({ message: "Course type already exists" });
     }
 
+    const updateData: Record<string, string> = {
+      name: String(name).trim(),
+    };
+
+    if (uploadedImageUrl || legacyImageUrl) {
+      updateData.imageUrl = uploadedImageUrl || legacyImageUrl;
+    }
+
     const updated = await CourseType.findByIdAndUpdate(
       req.params.mongoId,
-      {
-        name: String(name).trim(),
-        ...(imageUrl ? { imageUrl: String(imageUrl).trim() } : {}),
-      },
+      updateData,
       { new: true }
     );
 

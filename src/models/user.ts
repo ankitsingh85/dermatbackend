@@ -35,7 +35,7 @@ export interface IUser extends Document {
   addresses?: IUserAddress[];
   cartItems?: IUserCartItem[];
   wishlistItems?: IUserCartItem[];
-  profileImage?: string; // ✅ BASE64 STRING
+  profileImage?: string; // uploaded file path or legacy string
   password?: string;
   comparePassword(password: string): Promise<boolean>;
 }
@@ -87,7 +87,7 @@ const UserSchema = new Schema<IUser>(
         quantity: { type: Number, default: 1, min: 1 },
       },
     ],
-    profileImage: { type: String }, // BASE64
+    profileImage: { type: String },
     password: { type: String, select: false },
   },
   { timestamps: true }

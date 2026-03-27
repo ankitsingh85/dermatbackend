@@ -4,7 +4,7 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface ICategory extends Document {
   id: string;
   name: string;
-  imageUrl: string; // base64
+  imageUrl: string; // uploaded file path or legacy string
 }
 
 const CategorySchema: Schema = new Schema<ICategory>(

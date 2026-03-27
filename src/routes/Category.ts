@@ -1,7 +1,13 @@
 import express from "express";
 import Category from "../models/Category";
+import upload from "../middleware/uploads";
 
 const router = express.Router();
+
+const getUploadedPath = (file: Express.Multer.File | undefined) => {
+  if (!file) return undefined;
+  return `/uploads/${file.filename}`;
+};
 
 /* ================= GET ALL ================= */
 router.get("/", async (_req, res) => {
@@ -17,11 +23,15 @@ router.get("/", async (_req, res) => {
 });
 
 /* ================= CREATE ================= */
-router.post("/", async (req, res) => {
+router.post("/", upload.single("imageUrl"), async (req, res) => {
   try {
     const { name, imageUrl } = req.body;
-    if (!name || !imageUrl) {
-      return res.status(400).json({ message: "name and imageUrl required" });
+    const uploadedImageUrl = getUploadedPath(req.file);
+    if (!name) {
+      return res.status(400).json({ message: "name required" });
+    }
+    if (!uploadedImageUrl && !(typeof imageUrl === "string" && imageUrl.trim())) {
+      return res.status(400).json({ message: "imageUrl required" });
     }
 
     const last = await Category.findOne({}).sort({ createdAt: -1 }).lean();
@@ -33,8 +43,8 @@ router.post("/", async (req, res) => {
 
     const category = new Category({
       id: newId,
-      name,
-      imageUrl,
+      name: String(name).trim(),
+      imageUrl: uploadedImageUrl || String(imageUrl || "").trim(),
     });
 
     await category.save();
@@ -45,13 +55,22 @@ router.post("/", async (req, res) => {
 });
 
 /* ================= UPDATE ================= */
-router.put("/:mongoId", async (req, res) => {
+router.put("/:mongoId", upload.single("imageUrl"), async (req, res) => {
   try {
     const { name, imageUrl } = req.body;
+    const uploadedImageUrl = getUploadedPath(req.file);
+
+    const updateData: Record<string, unknown> = {};
+    if (name !== undefined) updateData.name = String(name).trim();
+    if (uploadedImageUrl) {
+      updateData.imageUrl = uploadedImageUrl;
+    } else if (typeof imageUrl === "string" && imageUrl.trim()) {
+      updateData.imageUrl = imageUrl.trim();
+    }
 
     const updated = await Category.findByIdAndUpdate(
       req.params.mongoId,
-      { name, imageUrl },
+      updateData,
       { new: true }
     );
 

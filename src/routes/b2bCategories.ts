@@ -1,25 +1,30 @@
 import express, { Request, Response } from "express";
 import B2BCategory from "../models/B2BCategory";
+import upload from "../middleware/uploads";
 
 const router = express.Router();
 
-/* ================= CREATE ================= */
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", upload.single("imageUrl"), async (req: Request, res: Response) => {
   try {
-    const { name, imageUrl } = req.body;
+    const { name } = req.body;
+    const uploadedImageUrl = req.file ? `/uploads/${req.file.filename}` : "";
+    const legacyImageUrl =
+      typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
 
-    if (!name || !imageUrl) {
+    if (!name?.trim() || (!uploadedImageUrl && !legacyImageUrl)) {
       return res.status(400).json({ message: "Name and image are required" });
     }
 
-    const category = await B2BCategory.create({ name, imageUrl });
+    const category = await B2BCategory.create({
+      name: String(name).trim(),
+      imageUrl: uploadedImageUrl || legacyImageUrl,
+    });
     res.status(201).json(category);
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }
 });
 
-/* ================= READ ALL ================= */
 router.get("/", async (_req: Request, res: Response) => {
   try {
     const categories = await B2BCategory.find().sort({ createdAt: -1 });
@@ -29,12 +34,22 @@ router.get("/", async (_req: Request, res: Response) => {
   }
 });
 
-/* ================= UPDATE ================= */
-router.put("/:id", async (req: Request, res: Response) => {
+router.put("/:id", upload.single("imageUrl"), async (req: Request, res: Response) => {
   try {
+    const { name } = req.body;
+    const uploadedImageUrl = req.file ? `/uploads/${req.file.filename}` : "";
+    const legacyImageUrl =
+      typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
+
+    const updateData: Record<string, string> = {};
+    if (name?.trim()) updateData.name = String(name).trim();
+    if (uploadedImageUrl || legacyImageUrl) {
+      updateData.imageUrl = uploadedImageUrl || legacyImageUrl;
+    }
+
     const updated = await B2BCategory.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updateData,
       { new: true }
     );
 
@@ -48,7 +63,6 @@ router.put("/:id", async (req: Request, res: Response) => {
   }
 });
 
-/* ================= DELETE ================= */
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
     const deleted = await B2BCategory.findByIdAndDelete(req.params.id);

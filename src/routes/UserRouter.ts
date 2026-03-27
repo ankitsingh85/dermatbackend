@@ -1,8 +1,26 @@
 import express from "express";
 import User from "../models/user";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
+import upload from "../middleware/uploads";
 
 const router = express.Router();
+
+const parseJsonArray = <T,>(value: unknown): T[] | undefined => {
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value !== "string" || !value.trim()) return undefined;
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as T[]) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const getUploadedPath = (file: Express.Multer.File | undefined) => {
+  if (!file) return undefined;
+  return `/uploads/${file.filename}`;
+};
 
 /* ================= GET CURRENT USER (ME) ================= */
 router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
@@ -34,7 +52,7 @@ router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
 });
 
 /* ================= CREATE USER ================= */
-router.post("/", async (req, res) => {
+router.post("/", upload.single("profileImage"), async (req, res) => {
   try {
     const {
       patientId,
@@ -44,6 +62,7 @@ router.post("/", async (req, res) => {
       address,
       profileImage,
     } = req.body;
+    const uploadedProfileImage = getUploadedPath(req.file);
 
     // ✅ STRICT VALIDATION
     if (!patientId || !name || !email) {
@@ -61,7 +80,7 @@ router.post("/", async (req, res) => {
       email,
       contactNo,
       address,
-      profileImage,
+      profileImage: uploadedProfileImage || profileImage,
     });
 
     res.status(201).json({
@@ -119,7 +138,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", upload.single("profileImage"), async (req, res) => {
   try {
     const {
       name,
@@ -132,40 +151,140 @@ router.put("/:id", async (req, res) => {
       wishlistItems,
     } = req.body;
 
-    const updateData: any = {
-      name,
-      email,
-      contactNo,
-      address,
-    };
+    const updateData: any = {};
 
-    if (profileImage) {
-      updateData.profileImage = profileImage; // ✅ base64 stored
+    // ---------------------------
+    // ✅ BASIC FIELDS
+    // ---------------------------
+    if (name !== undefined) {
+      updateData.name = String(name).trim();
     }
+
+    if (email !== undefined) {
+      updateData.email = String(email).trim().toLowerCase();
+    }
+
+    if (contactNo !== undefined) {
+      updateData.contactNo = String(contactNo).trim();
+    }
+
+    if (address !== undefined) {
+      updateData.address = String(address).trim();
+    }
+
+    // ---------------------------
+    // ✅ IMAGE HANDLING (WEB + MOBILE)
+    // ---------------------------
+
+    const uploadedProfileImage = req.file
+      ? `/uploads/${req.file.filename}`
+      : null;
+
+    if (uploadedProfileImage) {
+      // ✅ Web file upload
+      updateData.profileImage = uploadedProfileImage;
+    } else if (
+      typeof profileImage === "string" &&
+      profileImage.startsWith("data:image")
+    ) {
+      // ✅ Mobile base64 image
+      updateData.profileImage = profileImage;
+    }
+
+    // ❌ DO NOT overwrite if not sent
+
+    // ---------------------------
+    // ✅ ADDRESS PARSING (SUPER SAFE)
+    // ---------------------------
+
+    let parsedAddresses: any[] | undefined;
+
     if (Array.isArray(addresses)) {
-      updateData.addresses = addresses;
+      // ✅ Mobile JSON case
+      parsedAddresses = addresses;
+    } else if (typeof addresses === "string") {
+      // ✅ Web FormData case
+      try {
+        parsedAddresses = JSON.parse(addresses);
+      } catch (err) {
+        console.log("❌ Address parse error:", err);
+      }
     }
+
+    if (parsedAddresses && Array.isArray(parsedAddresses)) {
+      updateData.addresses = parsedAddresses;
+    }
+
+    // ---------------------------
+    // ✅ CART ITEMS (SAFE)
+    // ---------------------------
+
+    let parsedCart: any[] | undefined;
+
     if (Array.isArray(cartItems)) {
-      updateData.cartItems = cartItems;
+      parsedCart = cartItems;
+    } else if (typeof cartItems === "string") {
+      try {
+        parsedCart = JSON.parse(cartItems);
+      } catch {}
     }
+
+    if (parsedCart) {
+      updateData.cartItems = parsedCart;
+    }
+
+    // ---------------------------
+    // ✅ WISHLIST ITEMS (SAFE)
+    // ---------------------------
+
+    let parsedWishlist: any[] | undefined;
+
     if (Array.isArray(wishlistItems)) {
-      updateData.wishlistItems = wishlistItems;
+      parsedWishlist = wishlistItems;
+    } else if (typeof wishlistItems === "string") {
+      try {
+        parsedWishlist = JSON.parse(wishlistItems);
+      } catch {}
     }
+
+    if (parsedWishlist) {
+      updateData.wishlistItems = parsedWishlist;
+    }
+
+    // ---------------------------
+    // ✅ UPDATE USER
+    // ---------------------------
 
     const user = await User.findByIdAndUpdate(
       req.params.id,
       updateData,
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true,
+      }
     ).select("-password");
 
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
     }
 
-    res.json({ message: "User updated", user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    return res.json({
+      success: true,
+      message: "User updated successfully",
+      user,
+    });
+
+  } catch (err: any) {
+    console.error("🔥 UPDATE ERROR:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: err.message, // 👈 now you'll see real error
+    });
   }
 });
 
