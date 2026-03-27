@@ -103,12 +103,12 @@ server.use("/api/b2b-categories", b2bCategoryRoutes);
 server.use("/api/b2b-products", b2bProductRoutes);
 server.use("/api/courses", courseRoutes);
 server.use("/api/course-types", courseTypeRoutes);
-
+//console.log
 // -------------------- MONGODB CONNECTION --------------------
 mongoose
   .connect(process.env.MONGO_URI as string)
   .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+  .catch((err) => console.error("❌ MongoDB connection error err:", err));
 
 // -------------------- START SERVER --------------------
 const PORT = process.env.PORT || 8080;
