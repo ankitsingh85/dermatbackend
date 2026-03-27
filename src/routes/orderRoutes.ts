@@ -17,13 +17,22 @@ const hasItemType = (order: any, itemType: "product" | "treatment") => {
   );
 };
 
+const hasTreatmentName = (order: any) => {
+  const products = Array.isArray(order?.products) ? order.products : [];
+  return products.some((item: any) =>
+    String(item?.name || "").toLowerCase().includes("treatment")
+  );
+};
+
 const isLegacyTreatmentOrder = (order: any) => {
   const type = String(order?.address?.type || "").toLowerCase();
   const addressText = String(order?.address?.address || "").toLowerCase().trim();
+  const orderName = String(order?.products?.[0]?.name || "").toLowerCase();
   return (
     type === "other" ||
     addressText.includes("treatment booking") ||
-    addressText.includes("treatment")
+    addressText.includes("treatment") ||
+    orderName.includes("treatment")
   );
 };
 
@@ -37,15 +46,19 @@ const matchesOrderType = (order: any, requestedType?: string) => {
     return (
       orderType === "treatment" ||
       hasItemType(order, "treatment") ||
+      hasTreatmentName(order) ||
       isLegacyTreatmentOrder(order)
     );
   }
 
   return (
-    hasItemType(order, "product") ||
-    (orderType !== "treatment" &&
-      !isLegacyTreatmentOrder(order) &&
-      !hasItemType(order, "treatment"))
+    !(
+      orderType === "treatment" ||
+      hasItemType(order, "treatment") ||
+      hasTreatmentName(order) ||
+      isLegacyTreatmentOrder(order)
+    ) &&
+    (hasItemType(order, "product") || orderType === "product")
   );
 };
 
