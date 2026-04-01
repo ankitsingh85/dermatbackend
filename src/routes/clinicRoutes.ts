@@ -102,6 +102,26 @@ const parseDoctors = (value: unknown) => {
   }
 };
 
+const normalizeContactNumber = (value: unknown) =>
+  String(value ?? "").replace(/\D/g, "").trim();
+
+const normalizeDoctors = (value: unknown) => {
+  const parsed = parseDoctors(value);
+
+  return parsed
+    .map((item) => ({
+      name: typeof item?.name === "string" ? item.name.trim() : "",
+      regNo: typeof item?.regNo === "string" ? item.regNo.trim() : "",
+      specialization:
+        typeof item?.specialization === "string"
+          ? item.specialization.trim()
+          : "",
+    }))
+    .filter(
+      (item) => item.name && item.regNo && item.specialization
+    );
+};
+
 const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] => {
   if (!files || files.length === 0) return [];
   return files.map((file) => `/uploads/${file.filename}`);
@@ -132,9 +152,9 @@ router.post(
     { name: "clinicLogo", maxCount: 1 },
     { name: "bannerImage", maxCount: 1 },
     { name: "rateCard", maxCount: 1 },
-    { name: "specialOffers", maxCount: 20 },
-    { name: "photos", maxCount: 20 },
-    { name: "certifications", maxCount: 20 },
+    { name: "specialOffers", maxCount: 5 },
+    { name: "photos", maxCount: 10 },
+    { name: "certifications", maxCount: 5 },
   ]),
   async (req: Request, res: Response) => {
   try {
@@ -150,8 +170,10 @@ router.post(
       dermaCategory,
       address,
       email,
+      contactNo,
+      contactNumber,
       doctors,
-      videos,
+      video,
       ...rest
     } = req.body;
 
@@ -170,7 +192,10 @@ router.post(
         ? requestedCuc
         : await generateClinicCuc();
 
-    const parsedDoctors = parseDoctors(doctors);
+    const parsedDoctors = normalizeDoctors(doctors);
+    const normalizedContactNumber =
+      normalizeContactNumber(contactNumber) ||
+      normalizeContactNumber(contactNo);
 
     const uploadedClinicLogo = getUploadedPaths(files?.clinicLogo);
     const uploadedBannerImage = getUploadedPaths(files?.bannerImage);
@@ -186,6 +211,7 @@ router.post(
       dermaCategory,
       address: String(address).trim(),
       email: String(email).trim(),
+      ...(normalizedContactNumber ? { contactNumber: normalizedContactNumber } : {}),
       doctors: parsedDoctors,
       clinicLogo: uploadedClinicLogo[0] || undefined,
       bannerImage: uploadedBannerImage[0] || undefined,
@@ -193,7 +219,7 @@ router.post(
       specialOffers: uploadedSpecialOffers,
       photos: uploadedPhotos,
       certifications: uploadedCertifications,
-      videos: parseStringArray(videos),
+      video: video,
       ...rest,
     });
 
@@ -271,9 +297,9 @@ router.put(
     { name: "clinicLogo", maxCount: 1 },
     { name: "bannerImage", maxCount: 1 },
     { name: "rateCard", maxCount: 1 },
-    { name: "specialOffers", maxCount: 20 },
-    { name: "photos", maxCount: 20 },
-    { name: "certifications", maxCount: 20 },
+    { name: "specialOffers", maxCount: 5 },
+    { name: "photos", maxCount: 10 },
+    { name: "certifications", maxCount: 5 },
   ]),
   async (req, res) => {
   try {
@@ -304,18 +330,47 @@ router.put(
     const uploadedSpecialOffers = getUploadedPaths(files?.specialOffers);
     const uploadedPhotos = getUploadedPaths(files?.photos);
     const uploadedCertifications = getUploadedPaths(files?.certifications);
+    const normalizedContactNumber =
+      normalizeContactNumber(req.body?.contactNumber) ||
+      normalizeContactNumber(req.body?.contactNo);
+    const parsedDoctors =
+      typeof req.body?.doctors !== "undefined"
+        ? normalizeDoctors(req.body.doctors)
+        : existingClinic.doctors;
+    const parsedRateCard = parseStringArray(req.body?.rateCard);
+    const parsedSpecialOffers = parseStringArray(req.body?.specialOffers);
+    const parsedPhotos = parseStringArray(req.body?.photos);
+    const parsedCertifications = parseStringArray(req.body?.certifications);
 
     const updated = await Clinic.findByIdAndUpdate(
       req.params.id,
       {
         ...req.body,
+        ...(normalizedContactNumber ? { contactNumber: normalizedContactNumber } : {}),
         slug: nextSlug,
+        doctors: parsedDoctors,
         ...(uploadedClinicLogo.length ? { clinicLogo: uploadedClinicLogo[0] } : {}),
         ...(uploadedBannerImage.length ? { bannerImage: uploadedBannerImage[0] } : {}),
-        ...(uploadedRateCard.length ? { rateCard: uploadedRateCard } : {}),
-        ...(uploadedSpecialOffers.length ? { specialOffers: uploadedSpecialOffers } : {}),
-        ...(uploadedPhotos.length ? { photos: uploadedPhotos } : {}),
-        ...(uploadedCertifications.length ? { certifications: uploadedCertifications } : {}),
+        ...(uploadedRateCard.length
+          ? { rateCard: uploadedRateCard }
+          : req.body?.rateCard
+          ? { rateCard: parsedRateCard }
+          : {}),
+        ...(uploadedSpecialOffers.length
+          ? { specialOffers: uploadedSpecialOffers }
+          : req.body?.specialOffers
+          ? { specialOffers: parsedSpecialOffers }
+          : {}),
+        ...(uploadedPhotos.length
+          ? { photos: uploadedPhotos }
+          : req.body?.photos
+          ? { photos: parsedPhotos }
+          : {}),
+        ...(uploadedCertifications.length
+          ? { certifications: uploadedCertifications }
+          : req.body?.certifications
+          ? { certifications: parsedCertifications }
+          : {}),
       },
       { new: true }
     ).populate("dermaCategory", "name");

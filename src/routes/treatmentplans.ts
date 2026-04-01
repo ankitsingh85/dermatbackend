@@ -6,6 +6,31 @@ import TreatmentPlan from "../models/treatmentplans";
 
 const router = express.Router();
 
+const textOnlyRegex = /^[A-Za-z ]+$/;
+const digitsOnlyRegex = /^\d+$/;
+const isValidUrl = (value: unknown) => {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const stripHtml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const friendlyNumericFieldNames: Record<string, string> = {
+  mrp: "MRP",
+  offerPrice: "Offer price",
+  discountPercent: "Discount percent",
+  sessions: "No. of sessions",
+};
+
 const slugifyTreatmentName = (value: string) => {
   const slug = value
     .trim()
@@ -65,9 +90,14 @@ const parseBoolean = (value: unknown, fallback: boolean) => {
   return fallback;
 };
 
-const parseStringArray = (value: unknown): string[] => {
+const parseUploadedStringArray = (value: unknown): string[] => {
   if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string");
+    return value.filter(
+      (item): item is string =>
+        typeof item === "string" &&
+        !/^data:/i.test(item.trim()) &&
+        !/^blob:/i.test(item.trim())
+    );
   }
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -75,7 +105,12 @@ const parseStringArray = (value: unknown): string[] => {
     try {
       const parsed = JSON.parse(trimmed);
       if (Array.isArray(parsed)) {
-        return parsed.filter((item): item is string => typeof item === "string");
+        return parsed.filter(
+          (item): item is string =>
+            typeof item === "string" &&
+            !/^data:/i.test(item.trim()) &&
+            !/^blob:/i.test(item.trim())
+        );
       }
     } catch {
       return [];
@@ -127,10 +162,39 @@ router.post(
         isActive,
       } = req.body;
 
-      if (!tuc || !treatmentName || !clinic) {
+      const cleanTreatmentName = String(treatmentName ?? "").trim();
+      const cleanServiceCategory = String(serviceCategory ?? "").trim();
+      const cleanShortReelUrl = String(shortReelUrl ?? "").trim();
+      const rawBody = req.body as Record<string, unknown>;
+
+      if (!tuc || !cleanTreatmentName || !clinic) {
         return res
           .status(400)
           .json({ message: "tuc, treatmentName and clinic are required" });
+      }
+
+      if (!textOnlyRegex.test(cleanTreatmentName)) {
+        return res.status(400).json({
+          message: "Treatment plan name should contain only letters and spaces",
+        });
+      }
+
+      if (!cleanServiceCategory) {
+        return res.status(400).json({
+          message: "Treatment category is required",
+        });
+      }
+
+      if (!stripHtml(description)) {
+        return res.status(400).json({
+          message: "Description is required",
+        });
+      }
+
+      if (!isValidUrl(cleanShortReelUrl)) {
+        return res.status(400).json({
+          message: "Treatment short reel must be a valid URL",
+        });
       }
 
       if (!mongoose.isValidObjectId(clinic)) {
@@ -142,24 +206,68 @@ router.post(
         return res.status(400).json({ message: "Invalid clinic id" });
       }
 
+      const numericFields: Array<keyof typeof rawBody> = [
+        "mrp",
+        "offerPrice",
+        "discountPercent",
+        "sessions",
+      ];
+      for (const field of numericFields) {
+        const value = rawBody[field];
+        if (value === undefined || value === null || value === "") {
+          return res.status(400).json({
+            message: `${friendlyNumericFieldNames[String(field)] || String(field)} is required`,
+          });
+        }
+        if (!digitsOnlyRegex.test(String(value))) {
+          return res
+            .status(400)
+            .json({
+              message: `${
+                friendlyNumericFieldNames[String(field)] || String(field)
+              } must contain digits only`,
+            });
+        }
+      }
+
+      if (
+        rawBody.pricePerSession !== undefined &&
+        rawBody.pricePerSession !== "" &&
+        Number.isNaN(Number(rawBody.pricePerSession))
+      ) {
+        return res.status(400).json({
+          message: "pricePerSession must be a valid number",
+        });
+      }
+
+      const treatmentImages = getUploadedPaths(files?.treatmentImages).length
+        ? getUploadedPaths(files?.treatmentImages)
+        : parseUploadedStringArray(req.body.treatmentImages);
+
+      if (!treatmentImages.length) {
+        return res.status(400).json({
+          message: "At least one treatment image is required",
+        });
+      }
+
       const slug =
         typeof incomingSlug === "string" && incomingSlug.trim()
           ? incomingSlug.trim()
-          : await buildUniqueTreatmentSlug(treatmentName);
+          : await buildUniqueTreatmentSlug(cleanTreatmentName);
 
       const created = await TreatmentPlan.create({
         tuc,
-        treatmentName,
+        treatmentName: cleanTreatmentName,
         slug,
         clinic,
         description,
-        shortReelUrl,
-        serviceCategory,
+        shortReelUrl: cleanShortReelUrl,
+        serviceCategory: cleanServiceCategory,
         mrp: parseNumber(mrp),
         offerPrice: parseNumber(offerPrice),
         pricePerSession: parseNumber(pricePerSession),
         discountPercent: parseNumber(discountPercent),
-        sessions,
+        sessions: String(sessions).trim(),
         duration,
         validity,
         technologyUsed,
@@ -167,22 +275,19 @@ router.post(
         promoCode,
         addToCart: parseBoolean(addToCart, true),
         isActive: parseBoolean(isActive, true),
-        treatmentImages:
-          getUploadedPaths(files?.treatmentImages).length > 0
-            ? getUploadedPaths(files?.treatmentImages)
-            : parseStringArray(req.body.treatmentImages),
+        treatmentImages,
         beforeImages:
           getUploadedPaths(files?.beforeImages).length > 0
             ? getUploadedPaths(files?.beforeImages)
-            : parseStringArray(req.body.beforeImages),
+            : parseUploadedStringArray(req.body.beforeImages),
         afterImages:
           getUploadedPaths(files?.afterImages).length > 0
             ? getUploadedPaths(files?.afterImages)
-            : parseStringArray(req.body.afterImages),
+            : parseUploadedStringArray(req.body.afterImages),
         categoryIcons:
           getUploadedPaths(files?.categoryIcons).length > 0
             ? getUploadedPaths(files?.categoryIcons)
-            : parseStringArray(req.body.categoryIcons),
+            : parseUploadedStringArray(req.body.categoryIcons),
       });
 
       const populated = await TreatmentPlan.findById(created._id).populate(
@@ -318,25 +423,27 @@ router.put(
       if (uploadedTreatmentImages.length > 0) {
         payload.treatmentImages = uploadedTreatmentImages;
       } else if (payload.treatmentImages !== undefined) {
-        payload.treatmentImages = parseStringArray(payload.treatmentImages);
+        payload.treatmentImages = parseUploadedStringArray(
+          payload.treatmentImages
+        );
       }
 
       if (uploadedBeforeImages.length > 0) {
         payload.beforeImages = uploadedBeforeImages;
       } else if (payload.beforeImages !== undefined) {
-        payload.beforeImages = parseStringArray(payload.beforeImages);
+        payload.beforeImages = parseUploadedStringArray(payload.beforeImages);
       }
 
       if (uploadedAfterImages.length > 0) {
         payload.afterImages = uploadedAfterImages;
       } else if (payload.afterImages !== undefined) {
-        payload.afterImages = parseStringArray(payload.afterImages);
+        payload.afterImages = parseUploadedStringArray(payload.afterImages);
       }
 
       if (uploadedCategoryIcons.length > 0) {
         payload.categoryIcons = uploadedCategoryIcons;
       } else if (payload.categoryIcons !== undefined) {
-        payload.categoryIcons = parseStringArray(payload.categoryIcons);
+        payload.categoryIcons = parseUploadedStringArray(payload.categoryIcons);
       }
 
       const updated = await TreatmentPlan.findByIdAndUpdate(

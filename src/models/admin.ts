@@ -1,11 +1,15 @@
 import mongoose, { Document, Schema } from "mongoose";
 import bcrypt from "bcryptjs";
 
+const nameRegex = /^[A-Za-z ]+$/;
+const phoneRegex = /^\d{10}$/;
+const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+
 export interface IAdmin extends Document {
   empId: string;
   name: string;
   email: string;
-  phone?: string;
+  phone: string;
   password: string;
   role: "admin" | "superadmin" | "manager";
   comparePassword(password: string): Promise<boolean>;
@@ -23,6 +27,10 @@ const adminSchema = new Schema<IAdmin>(
       type: String,
       required: true,
       trim: true,
+      validate: {
+        validator: (value: string) => nameRegex.test(value),
+        message: "Name should contain only letters and spaces",
+      },
     },
 
     email: {
@@ -35,13 +43,23 @@ const adminSchema = new Schema<IAdmin>(
 
     phone: {
       type: String,
+      required: true,
       trim: true,
+      validate: {
+        validator: (value: string) => phoneRegex.test(value),
+        message: "Contact No. must contain exactly 10 digits",
+      },
     },
 
     password: {
       type: String,
       required: true,
-      select: false, // 🔐 hidden by default
+      select: false,
+      validate: {
+        validator: (value: string) => passwordRegex.test(value),
+        message:
+          "Password must be at least 8 characters and include a letter, a number, and a symbol",
+      },
     },
 
     role: {

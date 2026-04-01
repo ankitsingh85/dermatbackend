@@ -8,54 +8,41 @@ interface IDoctor {
 
 export interface IClinic extends Document {
   cuc: string;
-
   clinicName: string;
   slug?: string;
   clinicType?: string;
   ownerName?: string;
   website?: string;
-
   dermaCategory: mongoose.Types.ObjectId;
-
   clinicLogo?: string;
   bannerImage?: string;
   specialOffers?: string[];
   rateCard?: string[];
   photos?: string[];
-  videos?: string[];
+  video?: string;
   certifications?: string[];
-
   doctors: IDoctor[];
-
   address: string;
   city?: string;
   services?: string;
   sector?: string;
   pincode?: string;
   mapLink?: string;
-
   contactNumber?: string;
   whatsapp?: string;
   email: string;
   workingHours?: string;
-
   licenseNo?: string;
   experience?: string;
-
   treatmentsAvailable?: string;
   availableServices?: string;
-
   consultationFee?: string;
   bookingMode?: string;
-
   clinicDescription?: string;
-
   instagram?: string;
   linkedin?: string;
   facebook?: string;
-
   standardPlanLink?: string;
-
   clinicStatus?: string;
 }
 
@@ -89,7 +76,7 @@ const ClinicSchema = new Schema<IClinic>(
     specialOffers: [String],
     rateCard: [String],
     photos: [String],
-    videos: [String],
+    video: String,
     certifications: [String],
 
     doctors: [DoctorSchema],
@@ -101,7 +88,7 @@ const ClinicSchema = new Schema<IClinic>(
     pincode: String,
     mapLink: String,
 
-    contactNumber: String,
+    contactNumber: { type: String, trim: true },
     whatsapp: String,
     email: { type: String, required: true },
 

@@ -1,28 +1,49 @@
 import { Request, Response } from "express";
 import Admin from "../models/admin";
 
+const nameRegex = /^[A-Za-z ]+$/;
+const phoneRegex = /^\d{10}$/;
+const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+
 /* ================= CREATE ADMIN ================= */
 export const createAdmin = async (req: Request, res: Response) => {
-
   try {
-        console.log("🔥 RAW REQ BODY:", req.body);
+    const { empId, name, email, phone, password, accessLevel } = req.body;
 
-    let { empId, name, email, phone, password, accessLevel } = req.body;
+    const cleanName = String(name ?? "").trim();
+    const cleanEmail = String(email ?? "").trim().toLowerCase();
+    const cleanPhone = String(phone ?? "").trim();
+    const cleanPassword = String(password ?? "");
+    const cleanAccessLevel = String(accessLevel ?? "admin").trim().toLowerCase();
+    const resolvedEmpId = empId
+      ? String(empId).trim()
+      : `ADM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-
-    
-    // ✅ ALWAYS generate empId on backend
-    if (!empId) {
-      empId = `ADM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    if (!cleanName || !cleanEmail || !cleanPhone || !cleanPassword) {
+      return res.status(400).json({ message: "All fields are required" });
     }
 
-    // ✅ REQUIRED FIELDS
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "Missing required fields" });
+    if (!nameRegex.test(cleanName)) {
+      return res
+        .status(400)
+        .json({ message: "Name should contain only letters and spaces" });
+    }
+
+    if (!phoneRegex.test(cleanPhone)) {
+      return res
+        .status(400)
+        .json({ message: "Contact No. must contain exactly 10 digits" });
+    }
+
+    if (!passwordRegex.test(cleanPassword)) {
+      return res.status(400).json({
+        message:
+          "Password must be at least 8 characters and include a letter, a number, and a symbol",
+      });
     }
 
     const existingAdmin = await Admin.findOne({
-      $or: [{ email }, { empId }],
+      $or: [{ email: cleanEmail }, { empId: resolvedEmpId }],
     });
 
     if (existingAdmin) {
@@ -31,16 +52,16 @@ export const createAdmin = async (req: Request, res: Response) => {
       });
     }
 
-    const role = ["admin", "superadmin", "manager"].includes(accessLevel)
-      ? accessLevel
+    const role = ["admin", "superadmin", "manager"].includes(cleanAccessLevel)
+      ? cleanAccessLevel
       : "admin";
 
     const admin = await Admin.create({
-      empId,
-      name,
-      email: email.toLowerCase(),
-      phone,
-      password,
+      empId: resolvedEmpId,
+      name: cleanName,
+      email: cleanEmail,
+      phone: cleanPhone,
+      password: cleanPassword,
       role,
     });
 

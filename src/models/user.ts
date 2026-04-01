@@ -1,6 +1,10 @@
 import mongoose, { Document, Schema } from "mongoose";
 import bcrypt from "bcryptjs";
 
+const nameRegex = /^[A-Za-z ]+$/;
+const contactRegex = /^\d{10}$/;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export interface IUserAddress {
   type: string;
   address: string;
@@ -43,17 +47,26 @@ export interface IUserPrescriptionItem {
   uploadedAt?: Date;
 }
 
+export interface IUserTestReportItem {
+  _id?: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  uploadedAt?: Date;
+}
+
 export interface IUser extends Document {
-  patientId: string;
-  name: string;
-  email: string;
-  contactNo?: string;
-  address?: string;
+    patientId: string;
+    name: string;
+    email: string;
+    contactNo: string;
+    address?: string;
   addresses?: IUserAddress[];
   cartItems?: IUserCartItem[];
   wishlistItems?: IUserCartItem[];
   resultGallery?: IUserResultGalleryItem[];
   prescriptions?: IUserPrescriptionItem[];
+  testReports?: IUserTestReportItem[];
   profileImage?: string; // uploaded file path or legacy string
   password?: string;
   comparePassword(password: string): Promise<boolean>;
@@ -62,10 +75,36 @@ export interface IUser extends Document {
 const UserSchema = new Schema<IUser>(
   {
     patientId: { type: String, required: true, unique: true },
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true },
-    contactNo: { type: String, trim: true, sparse: true },
-    address: { type: String },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => nameRegex.test(value),
+        message: "Patient name should contain only letters and spaces",
+      },
+    },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => emailRegex.test(value),
+        message: "Enter a valid email address",
+      },
+    },
+    contactNo: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => contactRegex.test(value),
+        message: "Contact No. must contain exactly 10 digits",
+      },
+    },
+    address: { type: String, trim: true, default: "" },
     addresses: [
       {
         type: { type: String, enum: ["Home", "Work", "Other"], default: "Home" },
@@ -116,6 +155,14 @@ const UserSchema = new Schema<IUser>(
       },
     ],
     prescriptions: [
+      {
+        fileName: { type: String, required: true },
+        fileUrl: { type: String, required: true },
+        fileType: { type: String, default: "application/pdf" },
+        uploadedAt: { type: Date, default: () => new Date() },
+      },
+    ],
+    testReports: [
       {
         fileName: { type: String, required: true },
         fileUrl: { type: String, required: true },

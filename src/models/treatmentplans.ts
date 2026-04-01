@@ -1,5 +1,16 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+const textOnlyRegex = /^[A-Za-z ]+$/;
+const digitsOnlyRegex = /^\d+$/;
+const isValidUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 export interface ITreatmentPlan extends Document {
   tuc: string;
   treatmentName: string;
@@ -29,7 +40,15 @@ export interface ITreatmentPlan extends Document {
 const TreatmentPlanSchema = new Schema<ITreatmentPlan>(
   {
     tuc: { type: String, required: true, unique: true },
-    treatmentName: { type: String, required: true, trim: true },
+    treatmentName: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => textOnlyRegex.test(value),
+        message: "Treatment plan name should contain only letters and spaces",
+      },
+    },
     slug: { type: String, unique: true, sparse: true, trim: true },
     clinic: { type: Schema.Types.ObjectId, ref: "Clinic", required: true },
     description: { type: String, default: "" },
@@ -37,7 +56,14 @@ const TreatmentPlanSchema = new Schema<ITreatmentPlan>(
     treatmentImages: { type: [String], default: [] },
     beforeImages: { type: [String], default: [] },
     afterImages: { type: [String], default: [] },
-    shortReelUrl: { type: String, default: "" },
+    shortReelUrl: {
+      type: String,
+      default: "",
+      validate: {
+        validator: (value: string) => !value || isValidUrl(value),
+        message: "Treatment short reel must be a valid URL",
+      },
+    },
 
     serviceCategory: { type: String, default: "" },
     categoryIcons: { type: [String], default: [] },
@@ -47,7 +73,14 @@ const TreatmentPlanSchema = new Schema<ITreatmentPlan>(
     pricePerSession: { type: Number },
     discountPercent: { type: Number },
 
-    sessions: { type: String, default: "" },
+    sessions: {
+      type: String,
+      default: "",
+      validate: {
+        validator: (value: string) => !value || digitsOnlyRegex.test(value),
+        message: "No. of sessions must contain digits only",
+      },
+    },
     duration: { type: String, default: "" },
     validity: { type: String, default: "" },
     technologyUsed: { type: String, default: "" },

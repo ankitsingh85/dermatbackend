@@ -4,6 +4,25 @@ import Course from "../models/course";
 
 const router = express.Router();
 
+const textOnlyRegex = /^[A-Za-z ]+$/;
+const digitsOnlyRegex = /^\d+$/;
+const isValidYoutubeUrl = (value: unknown) => {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase();
+    return host.includes("youtube.com") || host.includes("youtu.be");
+  } catch {
+    return false;
+  }
+};
+
+const stripHtml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 const numberFields = ["feesInr", "netFeesInr", "maximumSeatsBatchSize"] as const;
 const dateFields = ["startDate", "endDate", "registrationDeadline"] as const;
 const courseCodePrefix = "DRMC";
@@ -45,6 +64,14 @@ const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] =>
 };
 
 const trimStringField = (value: unknown) => (typeof value === "string" ? value.trim() : value);
+const parseBoolean = (value: unknown, fallback: boolean) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.toLowerCase() === "true") return true;
+    if (value.toLowerCase() === "false") return false;
+  }
+  return fallback;
+};
 
 const getNextCourseCode = async () => {
   const latestCourse = await Course.findOne({
@@ -78,7 +105,13 @@ const normalizePayload = (
 
   for (const field of dateFields) {
     const value = payload[field];
-    payload[field] = value ? new Date(String(value)) : undefined;
+    if (!value) {
+      payload[field] = undefined;
+      continue;
+    }
+
+    const parsedDate = new Date(String(value));
+    payload[field] = Number.isNaN(parsedDate.getTime()) ? "INVALID_DATE" : parsedDate;
   }
 
   if (payload.applyDiscountVoucher !== undefined) {
@@ -114,6 +147,7 @@ const normalizePayload = (
   payload.postCourseSupport = trimStringField(payload.postCourseSupport);
   payload.mobileNo = trimStringField(payload.mobileNo);
   payload.contactForQueries = trimStringField(payload.contactForQueries);
+  payload.applyDiscountVoucher = parseBoolean(payload.applyDiscountVoucher, false);
 
   payload.targetAudience = parseStringArray(payload.targetAudience);
 
@@ -138,6 +172,157 @@ const normalizePayload = (
   return payload;
 };
 
+const validateCoursePayload = (
+  payload: Record<string, unknown>,
+  isCreate = false
+) => {
+  const requiredTextFields = [
+    "courseName",
+    "courseUniqueCode",
+    "courseType",
+    "instituteName",
+    "courseDuration",
+    "modeOfTraining",
+    "startDate",
+    "endDate",
+    "registrationDeadline",
+    "curriculumTopicsCovered",
+    "certificationProvided",
+    "affiliationAccreditation",
+    "location",
+    "currentAvailability",
+    "trainerInstructorName",
+    "trainerExperience",
+    "languageOfDelivery",
+    "whatsIncluded",
+    "whatsNotIncluded",
+    "learningOutcomes",
+    "refundCancellationPolicy",
+    "postCourseSupport",
+    "mobileNo",
+    "contactForQueries",
+  ] as const;
+
+  for (const field of requiredTextFields) {
+    if (isCreate && !stripHtml(payload[field])) {
+      return { message: `${String(field).replace(/([A-Z])/g, " $1")} is required` };
+    }
+  }
+
+  for (const field of dateFields) {
+    if (payload[field] === "INVALID_DATE") {
+      return { message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid date` };
+    }
+  }
+
+  if (
+    payload.courseName !== undefined &&
+    !textOnlyRegex.test(stripHtml(payload.courseName))
+  ) {
+    return { message: "Course name should contain only letters and spaces" };
+  }
+
+  if (
+    payload.instituteName !== undefined &&
+    !textOnlyRegex.test(stripHtml(payload.instituteName))
+  ) {
+    return { message: "Institute name should contain only letters and spaces" };
+  }
+
+  if (
+    payload.trainerInstructorName !== undefined &&
+    !textOnlyRegex.test(stripHtml(payload.trainerInstructorName))
+  ) {
+    return {
+      message: "Trainer / instructor name should contain only letters and spaces",
+    };
+  }
+
+  const requiredNumberFields = [
+    "feesInr",
+    "netFeesInr",
+    "maximumSeatsBatchSize",
+  ] as const;
+
+  for (const field of requiredNumberFields) {
+    if (
+      isCreate &&
+      (payload[field] === undefined || payload[field] === null || payload[field] === "")
+    ) {
+      return { message: `${String(field).replace(/([A-Z])/g, " $1")} is required` };
+    }
+
+    if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
+      return {
+        message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid number`,
+      };
+    }
+
+    if (
+      payload[field] !== undefined &&
+      !Number.isInteger(Number(payload[field]))
+    ) {
+      return {
+        message: `${String(field).replace(/([A-Z])/g, " $1")} must contain digits only`,
+      };
+    }
+  }
+
+  if (payload.mobileNo !== undefined && !digitsOnlyRegex.test(String(payload.mobileNo))) {
+    return { message: "Mobile number must contain digits only" };
+  }
+
+  if (
+    payload.mobileNo !== undefined &&
+    String(payload.mobileNo).trim() &&
+    String(payload.mobileNo).trim().length !== 10
+  ) {
+    return { message: "Mobile number must be exactly 10 digits" };
+  }
+
+  if (payload.courseDemoVideo !== undefined && !isValidYoutubeUrl(payload.courseDemoVideo)) {
+    return { message: "Course demo video must be a valid YouTube link" };
+  }
+
+  if (
+    isCreate &&
+    (!payload.courseImage || typeof payload.courseImage !== "string" || !String(payload.courseImage).trim())
+  ) {
+    return { message: "Course image is required" };
+  }
+
+  if (
+    isCreate &&
+    (!payload.trainerImage ||
+      typeof payload.trainerImage !== "string" ||
+      !String(payload.trainerImage).trim())
+  ) {
+    return { message: "Trainer image is required" };
+  }
+
+  if (
+    isCreate &&
+    (!payload.brochurePdfDownload ||
+      !Array.isArray(payload.brochurePdfDownload) ||
+      !payload.brochurePdfDownload.length)
+  ) {
+    return { message: "At least one brochure PDF is required" };
+  }
+
+  if (
+    payload.targetAudience !== undefined &&
+    !Array.isArray(payload.targetAudience)
+  ) {
+    return { message: "Target audience must be a valid list" };
+  }
+
+  if (isCreate && Array.isArray(payload.targetAudience) && payload.targetAudience.length === 0) {
+    return { message: "At least one target audience item is required" };
+  }
+
+  return null;
+};
+
 router.get("/next-code", async (_req: Request, res: Response) => {
   try {
     const courseUniqueCode = await getNextCourseCode();
@@ -158,6 +343,10 @@ router.post(
     try {
       const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
       const payload = normalizePayload(req.body, files);
+      const validationError = validateCoursePayload(payload, true);
+      if (validationError) {
+        return res.status(400).json(validationError);
+      }
 
       if (!String(payload.courseName || "").trim()) {
         return res.status(400).json({ message: "Course name is required" });
@@ -223,6 +412,10 @@ router.put(
     try {
       const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
       const payload = normalizePayload(req.body, files);
+      const validationError = validateCoursePayload(payload, false);
+      if (validationError) {
+        return res.status(400).json(validationError);
+      }
 
       if (payload.courseUniqueCode) {
         const duplicateCourse = await Course.findOne({

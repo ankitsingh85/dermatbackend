@@ -4,6 +4,23 @@ import Product from "../models/Products";
 
 const router = express.Router();
 
+const textOnlyRegex = /^[A-Za-z ]+$/;
+const isValidUrl = (value: unknown) => {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const stripHtml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 const parseJsonArray = (value: unknown): string[] | undefined => {
   if (Array.isArray(value)) {
     return value.map((item) => String(item)).filter(Boolean);
@@ -61,6 +78,107 @@ const normalizeProductPayload = (
   return payload;
 };
 
+const friendlyFieldNames: Record<string, string> = {
+  productName: "Product name",
+  category: "Category",
+  brandName: "Brand name",
+  description: "Description",
+  ingredients: "Ingredients",
+  targetConcerns: "Target concerns",
+  usageInstructions: "Usage instructions",
+  expiryDate: "Expiry date",
+  manufacturerName: "Manufacturer name",
+  licenseNumber: "License number",
+  packagingType: "Packaging type",
+  skinHairType: "Skin / hair type",
+  barcode: "Barcode",
+  netQuantity: "Net quantity",
+  mrpPrice: "MRP price",
+  discountedPrice: "Discounted price",
+  discountPercent: "Discount percent",
+  taxPercent: "Tax percent",
+  productShortVideo: "Product short video",
+  productImages: "Product images",
+};
+
+const validateProductPayload = (
+  payload: Record<string, unknown>,
+  isCreate = false
+) => {
+  const requiredTextFields = [
+    "productName",
+    "category",
+    "brandName",
+    "description",
+    "ingredients",
+    "targetConcerns",
+    "usageInstructions",
+    "expiryDate",
+    "manufacturerName",
+    "licenseNumber",
+    "packagingType",
+    "skinHairType",
+    "barcode",
+  ] as const;
+
+  for (const field of requiredTextFields) {
+    const value = stripHtml(payload[field]);
+    if (isCreate && !value.trim()) {
+      return { message: `${friendlyFieldNames[field]} is required` };
+    }
+  }
+
+  if (payload.productName !== undefined && !textOnlyRegex.test(stripHtml(payload.productName))) {
+    return { message: "Product name should contain only letters and spaces" };
+  }
+
+  if (payload.brandName !== undefined && !textOnlyRegex.test(stripHtml(payload.brandName))) {
+    return { message: "Brand name should contain only letters and spaces" };
+  }
+
+  if (
+    payload.manufacturerName !== undefined &&
+    !textOnlyRegex.test(stripHtml(payload.manufacturerName))
+  ) {
+    return {
+      message: "Manufacturer name should contain only letters and spaces",
+    };
+  }
+
+  if (payload.packagingType !== undefined && !textOnlyRegex.test(stripHtml(payload.packagingType))) {
+    return { message: "Packaging type should contain only letters and spaces" };
+  }
+
+  if (payload.licenseNumber !== undefined && !/^\d+$/.test(stripHtml(payload.licenseNumber))) {
+    return { message: "License number must contain digits only" };
+  }
+
+  if (payload.productShortVideo !== undefined && !isValidUrl(payload.productShortVideo)) {
+    return { message: "Product short video must be a valid URL" };
+  }
+
+  if (
+    isCreate &&
+    (!payload.productImages ||
+      !Array.isArray(payload.productImages) ||
+      !payload.productImages.length)
+  ) {
+    return { message: "At least one product image is required" };
+  }
+
+  const numericFields = ["netQuantity", "mrpPrice", "discountedPrice", "discountPercent", "taxPercent"] as const;
+  for (const field of numericFields) {
+    if (isCreate && (payload[field] === undefined || payload[field] === null || payload[field] === "")) {
+      return { message: `${friendlyFieldNames[field]} is required` };
+    }
+    if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
+      return { message: `${friendlyFieldNames[field]} must be a valid number` };
+    }
+  }
+
+  return null;
+};
+
 /** ================= CREATE PRODUCT ================= */
 router.post(
   "/",
@@ -71,6 +189,11 @@ router.post(
         | { [fieldname: string]: Express.Multer.File[] }
         | undefined;
       const payload = normalizeProductPayload(req, files);
+      payload.productSKU = String(payload.productSKU || `SKU-${Date.now().toString().slice(-6)}`);
+      const validationError = validateProductPayload(payload, true);
+      if (validationError) {
+        return res.status(400).json(validationError);
+      }
 
       const product = new Product({
         ...payload,
@@ -109,6 +232,10 @@ router.put(
         | { [fieldname: string]: Express.Multer.File[] }
         | undefined;
       const payload = normalizeProductPayload(req, files);
+      const validationError = validateProductPayload(payload, false);
+      if (validationError) {
+        return res.status(400).json(validationError);
+      }
 
       const updated = await Product.findByIdAndUpdate(
         req.params.id,

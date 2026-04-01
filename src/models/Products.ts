@@ -1,5 +1,16 @@
 import mongoose, { Schema, model, models, HydratedDocument } from "mongoose";
 
+const textOnlyRegex = /^[A-Za-z ]+$/;
+const digitsOnlyRegex = /^\d+$/;
+const isValidUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 /** ================= REVIEW INTERFACE ================= */
 export interface IReview {
   rating: number;
@@ -83,10 +94,25 @@ const ReviewSchema = new Schema<IReview>(
 const ProductSchema = new Schema<ProductDocument>(
   {
     productSKU: { type: String, required: true, unique: true },
-    productName: { type: String, required: true },
+    productName: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => textOnlyRegex.test(value),
+        message: "Product name should contain only letters and spaces",
+      },
+    },
     category: { type: String, required: true },
     // subCategory: { type: String }, ❌ intentionally disabled
-    brandName: { type: String },
+    brandName: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: (value: string) => !value || textOnlyRegex.test(value),
+        message: "Brand name should contain only letters and spaces",
+      },
+    },
 
     description: { type: String },
     ingredients: { type: String },
@@ -102,12 +128,39 @@ const ProductSchema = new Schema<ProductDocument>(
     taxPercent: { type: Number, default: 0 },
 
     expiryDate: { type: Date },
-    manufacturerName: { type: String },
-    licenseNumber: { type: String },
-    packagingType: { type: String },
+    manufacturerName: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: (value: string) => !value || textOnlyRegex.test(value),
+        message: "Manufacturer name should contain only letters and spaces",
+      },
+    },
+    licenseNumber: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: (value: string) => !value || digitsOnlyRegex.test(value),
+        message: "License number must contain digits only",
+      },
+    },
+    packagingType: {
+      type: String,
+      trim: true,
+      validate: {
+        validator: (value: string) => !value || textOnlyRegex.test(value),
+        message: "Packaging type should contain only letters and spaces",
+      },
+    },
 
     productImages: { type: [String], default: [] },
-    productShortVideo: { type: String },
+    productShortVideo: {
+      type: String,
+      validate: {
+        validator: (value: string) => !value || isValidUrl(value),
+        message: "Product short video must be a valid URL",
+      },
+    },
 
     gender: { type: String, default: "Unisex" },
     skinHairType: { type: String },

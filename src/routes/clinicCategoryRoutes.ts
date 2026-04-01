@@ -6,28 +6,20 @@ const router = express.Router();
 
 router.post("/", upload.single("imageUrl"), async (req, res) => {
   try {
-    const { categoryId, name } = req.body;
+    const { name } = req.body;
     const uploadedImageUrl = req.file ? `/uploads/${req.file.filename}` : "";
     const legacyImageUrl =
       typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
 
-    if (!categoryId || !name) {
-      return res
-        .status(400)
-        .json({ message: "Category ID and Name are required" });
+    if (!name) {
+      return res.status(400).json({ message: "Category name is required" });
     }
 
     if (!uploadedImageUrl && !legacyImageUrl) {
       return res.status(400).json({ message: "Category image is required" });
     }
 
-    const existing = await ClinicCategory.findOne({ categoryId });
-    if (existing) {
-      return res.status(400).json({ message: "Category ID must be unique" });
-    }
-
     const category = new ClinicCategory({
-      categoryId,
       name,
       imageUrl: uploadedImageUrl || legacyImageUrl,
     });
@@ -51,28 +43,16 @@ router.get("/", async (_req, res) => {
 
 router.put("/:id", upload.single("imageUrl"), async (req, res) => {
   try {
-    const { categoryId, name } = req.body;
+    const { name } = req.body;
     const uploadedImageUrl = req.file ? `/uploads/${req.file.filename}` : "";
     const legacyImageUrl =
       typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
 
-    if (!categoryId || !name) {
-      return res
-        .status(400)
-        .json({ message: "Category ID and Name are required" });
-    }
-
-    const existing = await ClinicCategory.findOne({
-      categoryId,
-      _id: { $ne: req.params.id },
-    });
-
-    if (existing) {
-      return res.status(400).json({ message: "Category ID must be unique" });
+    if (!name) {
+      return res.status(400).json({ message: "Category name is required" });
     }
 
     const updateData: Record<string, string> = {
-      categoryId,
       name,
     };
 

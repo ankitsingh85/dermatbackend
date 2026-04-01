@@ -157,6 +157,7 @@ export const userMobileLogin = async (req: Request, res: Response) => {
         name: nextName,
         email: nextEmail,
         contactNo: normalizedContact,
+        address: "",
       });
     }
 

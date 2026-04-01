@@ -32,7 +32,7 @@ export interface IB2BProduct {
   licenseNumber: string;
   mrp: number;
   discountedPrice: number;
-  gst: 5 | 12 | 18;
+  gst: 5 | 12 | 18 | 28;
   taxIncluded: boolean;
 
   /* ===== MEDIA ===== */
@@ -52,40 +52,118 @@ export type B2BProductDocument = HydratedDocument<IB2BProduct>;
 /* ================= SCHEMA ================= */
 const B2BProductSchema = new Schema<B2BProductDocument>(
   {
-    sku: { type: String, required: true, unique: true },
+    sku: { type: String, required: true, unique: true, trim: true },
 
-    productName: { type: String, required: true },
-    category: { type: String, required: true },
-    subCategory: { type: String },
-    hsnCode: { type: String },
-    brandName: { type: String },
+    productName: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
+        message: "Product name should contain only letters and spaces",
+      },
+    },
+    category: { type: String, required: true, trim: true },
+    subCategory: { type: String, trim: true },
+    hsnCode: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => /^\d+$/.test(value),
+        message: "HSN code must contain digits only",
+      },
+    },
+    brandName: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
+        message: "Brand name should contain only letters and spaces",
+      },
+    },
 
-    packSize: { type: String },
-    pricePerUnit: { type: Number },
-    bulkPriceTier: { type: String },
-    moq: { type: Number },
-    stockAvailable: { type: Number },
-    expiryDate: { type: Date },
+    packSize: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => /^\d+$/.test(value),
+        message: "Pack size must contain digits only",
+      },
+    },
+    pricePerUnit: { type: Number, required: true, min: 0 },
+    bulkPriceTier: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => /^\d+$/.test(value),
+        message: "Bulk price tier must contain digits only",
+      },
+    },
+    moq: { type: Number, required: true, min: 0 },
+    stockAvailable: { type: Number, required: true, min: 0 },
+    expiryDate: { type: Date, required: true },
 
-    description: { type: String },
-    ingredients: { type: String },
-    usageInstructions: { type: String },
-    treatmentIndications: { type: String },
-    certifications: { type: String },
+    description: { type: String, required: true, trim: true },
+    ingredients: { type: String, required: true, trim: true },
+    usageInstructions: { type: String, required: true, trim: true },
+    treatmentIndications: { type: String, required: true, trim: true },
+    certifications: { type: String, trim: true },
 
-    manufacturerName: { type: String },
-    licenseNumber: { type: String },
-    mrp: { type: Number },
-    discountedPrice: { type: Number },
-    gst: { type: Number, enum: [5, 12, 18], default: 5 },
+    manufacturerName: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
+        message: "Manufacturer name should contain only letters and spaces",
+      },
+    },
+    licenseNumber: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => /^\d+$/.test(value),
+        message: "License number must contain digits only",
+      },
+    },
+    mrp: { type: Number, required: true, min: 0 },
+    discountedPrice: { type: Number, required: true, min: 0 },
+    gst: { type: Number, enum: [5, 12, 18, 28], default: 5 },
     taxIncluded: { type: Boolean, default: true },
 
-    productImages: [{ type: String }],
-    productVideoUrl: { type: String },
-    msds: { type: String },
-    customerReviews: { type: String },
-    relatedProducts: { type: String },
-    promotionalTags: { type: String },
+    productImages: {
+      type: [String],
+      required: true,
+      validate: {
+        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
+        message: "At least one product image is required",
+      },
+    },
+    productVideoUrl: {
+      type: String,
+      required: true,
+      trim: true,
+      validate: {
+        validator: (value: string) => {
+          try {
+            const parsed = new URL(value);
+            return parsed.protocol === "http:" || parsed.protocol === "https:";
+          } catch {
+            return false;
+          }
+        },
+        message: "Product video URL must be a valid URL",
+      },
+    },
+    msds: { type: String, trim: true },
+    customerReviews: { type: String, trim: true },
+    relatedProducts: { type: String, trim: true },
+    promotionalTags: { type: String, trim: true },
   },
   { timestamps: true }
 );

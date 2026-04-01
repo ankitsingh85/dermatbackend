@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
 export interface AuthRequest extends Request {
-  clinic?: { id: string; role: string };
+  clinic?: { id: string; role: string; contactNo?: string };
 }
 
 export const clinicAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -15,10 +15,16 @@ export const clinicAuth = (req: AuthRequest, res: Response, next: NextFunction) 
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secretkey") as {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secret") as {
       id: string;
       role: string;
+      contactNo?: string;
     };
+
+    if (decoded.role !== "clinic") {
+      return res.status(403).json({ message: "Clinic access denied" });
+    }
+
     req.clinic = decoded;
     next();
   } catch (err) {

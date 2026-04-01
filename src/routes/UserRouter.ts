@@ -1,9 +1,15 @@
 import express from "express";
+import fs from "fs";
+import path from "path";
 import User from "../models/user";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
 import upload from "../middleware/uploads";
 
 const router = express.Router();
+
+const nameRegex = /^[A-Za-z ]+$/;
+const contactRegex = /^\d{10}$/;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const parseJsonArray = <T,>(value: unknown): T[] | undefined => {
   if (Array.isArray(value)) return value as T[];
@@ -25,6 +31,17 @@ const getUploadedPath = (file: Express.Multer.File | undefined) => {
 const getUploadedPaths = (files: Express.Multer.File[] | undefined) => {
   if (!files?.length) return [];
   return files.map((file) => `/uploads/${file.filename}`);
+};
+
+const deleteStoredFile = async (storedPath?: string | null) => {
+  if (!storedPath || !storedPath.startsWith("/uploads/")) return;
+
+  const absolutePath = path.join(process.cwd(), storedPath.replace(/^\//, ""));
+  try {
+    await fs.promises.unlink(absolutePath);
+  } catch {
+    // ignore cleanup failures
+  }
 };
 
 /* ================= GET CURRENT USER (ME) ================= */
@@ -50,6 +67,7 @@ router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
       wishlistItems: user.wishlistItems || [],
       resultGallery: user.resultGallery || [],
       prescriptions: user.prescriptions || [],
+      testReports: user.testReports || [],
       profileImage: user.profileImage,
     });
   } catch (err) {
@@ -70,23 +88,47 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       profileImage,
     } = req.body;
     const uploadedProfileImage = getUploadedPath(req.file);
+    const resolvedPatientId = patientId
+      ? String(patientId).trim()
+      : `PAT-${Date.now().toString().slice(-6)}`;
+    const cleanName = String(name ?? "").trim();
+    const cleanEmail = String(email ?? "").trim().toLowerCase();
+    const cleanContactNo = String(contactNo ?? "").trim();
+    const cleanAddress = String(address ?? "").trim();
 
-    // ✅ STRICT VALIDATION
-    if (!patientId || !name || !email) {
-      return res.status(400).json({ message: "Missing required fields" });
+    if (!cleanName || !cleanEmail || !cleanContactNo || !cleanAddress) {
+      return res.status(400).json({ message: "All fields are required" });
     }
 
-    const exists = await User.findOne({ email });
+    if (!nameRegex.test(cleanName)) {
+      return res
+        .status(400)
+        .json({ message: "Patient name should contain only letters and spaces" });
+    }
+
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ message: "Enter a valid email address" });
+    }
+
+    if (!contactRegex.test(cleanContactNo)) {
+      return res
+        .status(400)
+        .json({ message: "Contact No. must contain exactly 10 digits" });
+    }
+
+    const exists = await User.findOne({
+      $or: [{ email: cleanEmail }, { contactNo: cleanContactNo }, { patientId: resolvedPatientId }],
+    });
     if (exists) {
-      return res.status(400).json({ message: "User already exists" });
+      return res.status(400).json({ message: "User with same email, contact number or ID already exists" });
     }
 
     const user = await User.create({
-      patientId,
-      name,
-      email,
-      contactNo,
-      address,
+      patientId: resolvedPatientId,
+      name: cleanName,
+      email: cleanEmail,
+      contactNo: cleanContactNo,
+      address: cleanAddress,
       profileImage: uploadedProfileImage || profileImage,
     });
 
@@ -215,9 +257,29 @@ router.delete("/:id/result-gallery/:itemId", async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    user.resultGallery = (user.resultGallery || []).filter(
-      (item: any) => item?._id?.toString() !== req.params.itemId
+    const side = String(req.query.side || "").toLowerCase();
+    const gallery = user.resultGallery || [];
+    const matchedItem = gallery.find(
+      (item: any) => item?._id?.toString() === req.params.itemId
     );
+
+    if (matchedItem && (side === "before" || side === "after")) {
+      const field = side === "before" ? "beforeImage" : "afterImage";
+      await deleteStoredFile((matchedItem as any)[field]);
+      (matchedItem as any)[field] = "";
+
+      user.resultGallery = gallery.filter((item: any) => {
+        if (item?._id?.toString() !== req.params.itemId) return true;
+        return Boolean(item.beforeImage || item.afterImage);
+      });
+    } else if (matchedItem) {
+      await deleteStoredFile((matchedItem as any).beforeImage);
+      await deleteStoredFile((matchedItem as any).afterImage);
+      user.resultGallery = gallery.filter(
+        (item: any) => item?._id?.toString() !== req.params.itemId
+      );
+    }
+
     await user.save();
 
     res.json({
@@ -227,6 +289,72 @@ router.delete("/:id/result-gallery/:itemId", async (req, res) => {
   } catch (err: any) {
     console.error("Delete gallery error:", err);
     res.status(500).json({ message: "Failed to delete gallery item" });
+  }
+});
+
+/* ================= UPLOAD TEST REPORT ================= */
+router.post(
+  "/:id/test-reports",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "Test report file is required" });
+      }
+
+      const user = await User.findById(req.params.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      user.testReports = user.testReports || [];
+      user.testReports.unshift({
+        fileName: req.file.originalname,
+        fileUrl: getUploadedPath(req.file) || "",
+        fileType: req.file.mimetype,
+        uploadedAt: new Date(),
+      });
+
+      await user.save();
+
+      res.status(201).json({
+        message: "Test report uploaded successfully",
+        testReports: user.testReports,
+      });
+    } catch (err: any) {
+      console.error("Upload test report error:", err);
+      res.status(500).json({ message: "Failed to upload test report" });
+    }
+  }
+);
+
+/* ================= DELETE TEST REPORT ================= */
+router.delete("/:id/test-reports/:itemId", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const target = (user.testReports || []).find(
+      (item: any) => item?._id?.toString() === req.params.itemId
+    );
+    if (target) {
+      await deleteStoredFile(target.fileUrl);
+    }
+
+    user.testReports = (user.testReports || []).filter(
+      (item: any) => item?._id?.toString() !== req.params.itemId
+    );
+    await user.save();
+
+    res.json({
+      message: "Test report deleted successfully",
+      testReports: user.testReports,
+    });
+  } catch (err: any) {
+    console.error("Delete test report error:", err);
+    res.status(500).json({ message: "Failed to delete test report" });
   }
 });
 
