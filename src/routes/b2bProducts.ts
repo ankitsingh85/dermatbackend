@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import B2BProduct from "../models/B2BProduct";
+import upload from "../middleware/uploads";
 
 const router = express.Router();
 
@@ -43,6 +44,11 @@ const parseJsonArray = (value: unknown): string[] | undefined => {
   return undefined;
 };
 
+const getUploadedPaths = (files: Express.Multer.File[] | undefined) => {
+  if (!files || files.length === 0) return [];
+  return files.map((file) => `/uploads/${file.filename}`);
+};
+
 const normalizeNumericFields = (payload: Record<string, unknown>) => {
   const fields = [
     "packSize",
@@ -62,14 +68,20 @@ const normalizeNumericFields = (payload: Record<string, unknown>) => {
   }
 };
 
+const normalizeBooleanFields = (payload: Record<string, unknown>) => {
+  if (payload.taxIncluded !== undefined) {
+    if (typeof payload.taxIncluded === "string") {
+      payload.taxIncluded = payload.taxIncluded.toLowerCase() === "true";
+    } else {
+      payload.taxIncluded = Boolean(payload.taxIncluded);
+    }
+  }
+};
+
 const normalizeB2BPayload = (body: Record<string, unknown>) => {
   const payload: Record<string, unknown> = { ...body };
   normalizeNumericFields(payload);
-
-  const parsedImages = parseJsonArray(payload.productImages);
-  if (parsedImages) {
-    payload.productImages = parsedImages;
-  }
+  normalizeBooleanFields(payload);
 
   return payload;
 };
@@ -208,27 +220,43 @@ const validateB2BPayload = (
 };
 
 /* ================= CREATE ================= */
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const payload = normalizeB2BPayload(req.body as Record<string, unknown>);
-    payload.sku = String(payload.sku || `B2B-${Date.now().toString().slice(-6)}`);
+router.post(
+  "/",
+  upload.fields([{ name: "productImages", maxCount: 10 }]),
+  async (req: Request, res: Response) => {
+    try {
+      const files = req.files as
+        | { [fieldname: string]: Express.Multer.File[] }
+        | undefined;
+      const payload = normalizeB2BPayload(req.body as Record<string, unknown>);
+      const uploadedImages = getUploadedPaths(files?.productImages);
+      const parsedImages = parseJsonArray(payload.productImages);
 
-    const validationError = validateB2BPayload(payload, true);
-    if (validationError) {
-      return res.status(400).json(validationError);
+      if (uploadedImages.length > 0) {
+        payload.productImages = uploadedImages;
+      } else if (parsedImages) {
+        payload.productImages = parsedImages;
+      }
+
+      payload.sku = String(payload.sku || `B2B-${Date.now().toString().slice(-6)}`);
+
+      const validationError = validateB2BPayload(payload, true);
+      if (validationError) {
+        return res.status(400).json(validationError);
+      }
+
+      const product = new B2BProduct({
+        ...payload,
+      });
+
+      await product.save();
+      res.status(201).json(product);
+    } catch (err: any) {
+      console.error("B2B create error:", err);
+      res.status(500).json({ message: err.message });
     }
-
-    const product = new B2BProduct({
-      ...payload,
-    });
-
-    await product.save();
-    res.status(201).json(product);
-  } catch (err: any) {
-    console.error("B2B create error:", err);
-    res.status(500).json({ message: err.message });
   }
-});
+);
 
 /* ================= LIST ================= */
 router.get("/", async (_req, res) => {
@@ -237,31 +265,47 @@ router.get("/", async (_req, res) => {
 });
 
 /* ================= UPDATE ================= */
-router.put("/:id", async (req: Request, res: Response) => {
-  try {
-    const { _id, createdAt, updatedAt, ...updateData } = req.body;
-    const payload = normalizeB2BPayload(updateData as Record<string, unknown>);
-    const validationError = validateB2BPayload(payload, false);
-    if (validationError) {
-      return res.status(400).json(validationError);
+router.put(
+  "/:id",
+  upload.fields([{ name: "productImages", maxCount: 10 }]),
+  async (req: Request, res: Response) => {
+    try {
+      const files = req.files as
+        | { [fieldname: string]: Express.Multer.File[] }
+        | undefined;
+      const { _id, createdAt, updatedAt, ...updateData } = req.body;
+      const payload = normalizeB2BPayload(updateData as Record<string, unknown>);
+      const uploadedImages = getUploadedPaths(files?.productImages);
+      const parsedImages = parseJsonArray(payload.productImages);
+
+      if (uploadedImages.length > 0) {
+        payload.productImages = uploadedImages;
+      } else if (parsedImages) {
+        payload.productImages = parsedImages;
+      }
+
+      const validationError = validateB2BPayload(payload, false);
+      if (validationError) {
+        return res.status(400).json(validationError);
+      }
+
+      const updated = await B2BProduct.findByIdAndUpdate(
+        req.params.id,
+        payload,
+        { new: true, runValidators: true }
+      );
+
+      if (!updated) {
+        return res.status(404).json({ message: "B2B product not found" });
+      }
+
+      res.json(updated);
+    } catch (err: any) {
+      console.error("B2B update error:", err);
+      res.status(500).json({ message: err.message });
     }
-
-    const updated = await B2BProduct.findByIdAndUpdate(
-      req.params.id,
-      payload,
-      { new: true, runValidators: true }
-    );
-
-    if (!updated) {
-      return res.status(404).json({ message: "B2B product not found" });
-    }
-
-    res.json(updated);
-  } catch (err: any) {
-    console.error("B2B update error:", err);
-    res.status(500).json({ message: err.message });
   }
-});
+);
 
 /* ================= DELETE ================= */
 router.delete("/:id", async (req, res) => {

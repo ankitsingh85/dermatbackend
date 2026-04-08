@@ -1,7 +1,9 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface IOrder extends Document {
-  userId: mongoose.Types.ObjectId;
+  userId?: mongoose.Types.ObjectId;
+  clinicId?: mongoose.Types.ObjectId;
+  ownerType?: "user" | "clinic";
   orderType: "product" | "treatment";
   products: {
     id: string;
@@ -26,7 +28,18 @@ const OrderSchema = new Schema<IOrder>(
     userId: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: false,
+    },
+    clinicId: {
+      type: Schema.Types.ObjectId,
+      ref: "Clinic",
+      required: false,
+      index: true,
+    },
+    ownerType: {
+      type: String,
+      enum: ["user", "clinic"],
+      default: "user",
     },
     orderType: {
       type: String,
@@ -51,7 +64,7 @@ const OrderSchema = new Schema<IOrder>(
     address: {
       type: {
         type: String,
-        enum: ["Home", "Work", "Other"],
+        enum: ["Home", "Work", "Other", "Clinic"],
         required: true,
       },
       address: { type: String, required: true },

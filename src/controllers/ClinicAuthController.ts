@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
+import { generateNextClinicCuc } from "../utils/clinicCuc";
 
 const generateToken = (id: string, role: string, contactNo?: string) => {
   return jwt.sign(
@@ -106,13 +107,8 @@ export const clinicMobileLogin = async (req: Request, res: Response) => {
         });
       }
 
-      const cuc = `CUC-${Date.now().toString().slice(-8)}-${Math.random()
-        .toString(36)
-        .slice(2, 6)
-        .toUpperCase()}`;
-
       clinic = await Clinic.create({
-        cuc,
+        cuc: await generateNextClinicCuc(),
         clinicName,
         slug: await buildUniqueClinicSlug(clinicName),
         dermaCategory: category,

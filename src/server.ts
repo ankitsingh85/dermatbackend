@@ -11,7 +11,6 @@ import adminRoutes from "./routes/AdminRouter";
 import categoryRoutes from "./routes/Category";
 import clinicRoutes from "./routes/clinicRoutes";
 import productRoutes from "./routes/productRoutes";
-import appointmentRoutes from "./routes/appointmentsRoutes";
 import doctorRoutes from "./routes/doctorRoutes";
 import editClinicRoutes from "./routes/EditClinicRoutes";
 import serviceRoutes from "./routes/serviceRoutes";
@@ -33,6 +32,7 @@ import b2bCategoryRoutes from "./routes/b2bCategories";
 import b2bProductRoutes from "./routes/b2bProducts";
 import courseRoutes from "./routes/courseRoutes";
 import courseTypeRoutes from "./routes/courseTypeRoutes";
+import leadRoutes from "./routes/leadRoutes";
 
 dotenv.config();
 
@@ -81,7 +81,6 @@ server.use("/api/admins", adminRoutes);
 server.use("/api/categories", categoryRoutes);
 server.use("/api/clinics", clinicRoutes);
 server.use("/api/products", productRoutes);
-server.use("/api/appointments", appointmentRoutes);
 server.use("/api/doctors", doctorRoutes);
 server.use("/api/editclinics", editClinicRoutes);
 server.use("/api/services", serviceRoutes);
@@ -103,6 +102,7 @@ server.use("/api/b2b-categories", b2bCategoryRoutes);
 server.use("/api/b2b-products", b2bProductRoutes);
 server.use("/api/courses", courseRoutes);
 server.use("/api/course-types", courseTypeRoutes);
+server.use("/api/leads", leadRoutes);
 //console.log
 // -------------------- MONGODB CONNECTION --------------------
 mongoose

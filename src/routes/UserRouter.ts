@@ -28,11 +28,6 @@ const getUploadedPath = (file: Express.Multer.File | undefined) => {
   return `/uploads/${file.filename}`;
 };
 
-const getUploadedPaths = (files: Express.Multer.File[] | undefined) => {
-  if (!files?.length) return [];
-  return files.map((file) => `/uploads/${file.filename}`);
-};
-
 const deleteStoredFile = async (storedPath?: string | null) => {
   if (!storedPath || !storedPath.startsWith("/uploads/")) return;
 
@@ -85,7 +80,6 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       email,
       contactNo,
       address,
-      profileImage,
     } = req.body;
     const uploadedProfileImage = getUploadedPath(req.file);
     const resolvedPatientId = patientId
@@ -129,7 +123,7 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       email: cleanEmail,
       contactNo: cleanContactNo,
       address: cleanAddress,
-      profileImage: uploadedProfileImage || profileImage,
+      profileImage: uploadedProfileImage || "",
     });
 
     res.status(201).json({
@@ -441,7 +435,6 @@ router.put("/:id", upload.single("profileImage"), async (req, res) => {
       email,
       contactNo,
       address,
-      profileImage,
       addresses,
       cartItems,
       wishlistItems,
@@ -477,21 +470,8 @@ router.put("/:id", upload.single("profileImage"), async (req, res) => {
       : null;
 
     if (uploadedProfileImage) {
-      // ✅ Web file upload
       updateData.profileImage = uploadedProfileImage;
-    } else if (
-      typeof profileImage === "string" &&
-      profileImage.startsWith("data:image")
-    ) {
-      // ✅ Mobile base64 image
-      updateData.profileImage = profileImage;
     }
-
-    // ❌ DO NOT overwrite if not sent
-
-    // ---------------------------
-    // ✅ ADDRESS PARSING (SUPER SAFE)
-    // ---------------------------
 
     let parsedAddresses: any[] | undefined;
 
@@ -586,3 +566,4 @@ router.put("/:id", upload.single("profileImage"), async (req, res) => {
 
 
 export default router;
+

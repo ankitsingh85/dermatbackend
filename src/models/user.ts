@@ -67,7 +67,7 @@ export interface IUser extends Document {
   resultGallery?: IUserResultGalleryItem[];
   prescriptions?: IUserPrescriptionItem[];
   testReports?: IUserTestReportItem[];
-  profileImage?: string; // uploaded file path or legacy string
+  profileImage?: string; // uploaded file path only
   password?: string;
   comparePassword(password: string): Promise<boolean>;
 }
@@ -170,7 +170,7 @@ const UserSchema = new Schema<IUser>(
         uploadedAt: { type: Date, default: () => new Date() },
       },
     ],
-    profileImage: { type: String },
+    profileImage: { type: String, trim: true, default: "" },
     password: { type: String, select: false },
   },
   { timestamps: true }

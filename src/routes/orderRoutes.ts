@@ -65,21 +65,27 @@ const matchesOrderType = (order: any, requestedType?: string) => {
 /** ✅ Create new order */
 router.post("/", async (req, res) => {
   try {
-    const { userId, products, totalAmount, address, orderType } = req.body;
+    const { userId, clinicId, products, totalAmount, address, orderType, ownerType } = req.body;
 
-    if (!userId || !products || !totalAmount || !address) {
+    if ((!userId && !clinicId) || !products || !totalAmount || !address) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid userId" });
+    }
+
+    if (clinicId && !mongoose.Types.ObjectId.isValid(clinicId)) {
+      return res.status(400).json({ message: "Invalid clinicId" });
     }
 
     // const user = await UserProfile.findById(userId);
     // if (!user) return res.status(404).json({ message: "User not found" });
 
     const order = new Order({
-      userId,
+      userId: userId || undefined,
+      clinicId: clinicId || undefined,
+      ownerType: ownerType === "clinic" ? "clinic" : "user",
       products,
       totalAmount,
       address,
@@ -100,18 +106,32 @@ router.post("/", async (req, res) => {
 router.get("/my", async (req, res) => {
   try {
     const userId = req.headers["x-user-id"] as string;
+    const clinicId = req.headers["x-clinic-id"] as string;
+    const ownerType = String(req.headers["x-owner-type"] || "").toLowerCase();
     const requestedType = req.query.orderType as string | undefined;
 
-    if (!userId) {
-      return res.status(401).json({ message: "User ID missing" });
+    if (!userId && !clinicId) {
+      return res.status(401).json({ message: "User or clinic ID missing" });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
 
-    const orders = await Order.find({ userId })
+    if (clinicId && !mongoose.Types.ObjectId.isValid(clinicId)) {
+      return res.status(400).json({ message: "Invalid clinic ID" });
+    }
+
+    const query: any = {};
+    if (ownerType === "clinic" || clinicId) {
+      query.clinicId = clinicId;
+    } else {
+      query.userId = userId;
+    }
+
+    const orders = await Order.find(query)
       .populate("userId", "name email")
+      .populate("clinicId", "clinicName email address contactNumber")
       .sort({ createdAt: -1 });
 
     return res

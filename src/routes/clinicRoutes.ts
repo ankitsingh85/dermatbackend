@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
+import { generateNextClinicCuc } from "../utils/clinicCuc";
 
 const router = express.Router();
 
@@ -48,15 +49,6 @@ const ensureClinicSlug = async (clinic: any) => {
   );
   await clinic.save();
   return clinic;
-};
-
-const generateClinicCuc = async () => {
-  let cuc = "";
-  do {
-    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
-    cuc = `CUC-${suffix}`;
-  } while (await Clinic.findOne({ cuc }));
-  return cuc;
 };
 
 const parseStringArray = (value: unknown): string[] => {
@@ -165,7 +157,6 @@ router.post(
       | undefined;
 
     const {
-      cuc,
       clinicName,
       dermaCategory,
       address,
@@ -186,16 +177,11 @@ router.post(
       return res.status(400).json({ message: "Invalid clinic category" });
     }
 
-    const requestedCuc = typeof cuc === "string" ? cuc.trim() : "";
-    const nextCuc =
-      requestedCuc && !(await Clinic.findOne({ cuc: requestedCuc }))
-        ? requestedCuc
-        : await generateClinicCuc();
-
     const parsedDoctors = normalizeDoctors(doctors);
     const normalizedContactNumber =
       normalizeContactNumber(contactNumber) ||
       normalizeContactNumber(contactNo);
+    const nextCuc = await generateNextClinicCuc();
 
     const uploadedClinicLogo = getUploadedPaths(files?.clinicLogo);
     const uploadedBannerImage = getUploadedPaths(files?.bannerImage);
