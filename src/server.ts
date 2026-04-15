@@ -33,6 +33,8 @@ import b2bProductRoutes from "./routes/b2bProducts";
 import courseRoutes from "./routes/courseRoutes";
 import courseTypeRoutes from "./routes/courseTypeRoutes";
 import leadRoutes from "./routes/leadRoutes";
+import workshopTrainingRoutes from "./routes/workshopTrainingRoutes";
+import trainingTypeRoutes from "./routes/trainingTypeRoutes";
 
 dotenv.config();
 
@@ -103,6 +105,8 @@ server.use("/api/b2b-products", b2bProductRoutes);
 server.use("/api/courses", courseRoutes);
 server.use("/api/course-types", courseTypeRoutes);
 server.use("/api/leads", leadRoutes);
+server.use("/api/workshop-trainings", workshopTrainingRoutes);
+server.use("/api/training-types", trainingTypeRoutes);
 //console.log
 // -------------------- MONGODB CONNECTION --------------------
 mongoose
