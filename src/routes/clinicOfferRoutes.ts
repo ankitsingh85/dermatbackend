@@ -11,6 +11,18 @@ const router = express.Router();
 const getUploadedPath = (file?: Express.Multer.File) =>
   file ? `/uploads/${file.filename}` : "";
 
+const normalizeOfferPayload = (offer: any) => {
+  const source = typeof offer?.toObject === "function" ? offer.toObject() : offer;
+  if (!source) return source;
+
+  const imageUrl = source.imageUrl || source.imageBase64 || "";
+  const { imageBase64: _legacyImageBase64, ...rest } = source;
+  return {
+    ...rest,
+    imageUrl,
+  };
+};
+
 const deleteStoredFile = async (storedPath?: string | null) => {
   if (!storedPath || !storedPath.startsWith("/uploads/")) return;
 
@@ -28,13 +40,14 @@ const deleteUploadedFiles = async (files: Express.Multer.File[] | undefined) => 
 };
 
 // GET ALL OFFERS
-router.get("/", async (req: Request, res: Response) => {
+router.get("/", async (_req: Request, res: Response) => {
   try {
     const offers = await Offer3.find()
+      .select("+imageBase64")
       .populate("clinicId")
       .populate("categoryId")
       .sort({ createdAt: -1 });
-    res.status(200).json(offers);
+    res.status(200).json(offers.map(normalizeOfferPayload));
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch offers", error: err });
   }
@@ -83,13 +96,13 @@ router.post(
 
       const created = await Offer3.insertMany(
         files.map((file) => ({
-          imageBase64: getUploadedPath(file),
+          imageUrl: getUploadedPath(file),
           clinicId: clinic._id,
           categoryId: resolvedCategoryId,
         }))
       );
 
-      res.status(201).json(created);
+      res.status(201).json(created.map(normalizeOfferPayload));
     } catch (err) {
       await deleteUploadedFiles((req.files as Express.Multer.File[] | undefined) || []);
       res.status(500).json({ message: "Failed to add offer", error: err });
@@ -103,40 +116,43 @@ router.put(
   upload.single("image"),
   async (req: Request, res: Response) => {
     try {
-      const existing = await Offer3.findById(req.params.id);
+      const existing = await Offer3.findById(req.params.id).select("+imageBase64");
       if (!existing) return res.status(404).json({ message: "Offer not found" });
 
       const file = req.file;
       const { clinicId, categoryId } = req.body;
       if (!file) return res.status(400).json({ message: "Image is required" });
 
-      const updatePayload: Record<string, unknown> = { imageBase64: getUploadedPath(file) };
+      const updatePayload: any = {
+        $set: { imageUrl: getUploadedPath(file) },
+        $unset: { imageBase64: "" },
+      };
 
       if (clinicId) {
         const clinic = await Clinic.findById(clinicId);
         if (!clinic) {
-          await deleteStoredFile(updatePayload.imageBase64 as string);
+          await deleteStoredFile(updatePayload.$set.imageUrl);
           return res.status(404).json({ message: "Clinic not found" });
         }
-        updatePayload.clinicId = clinic._id;
+        updatePayload.$set.clinicId = clinic._id;
 
         if (categoryId) {
           const category = await ClinicCategory.findById(categoryId);
           if (!category) {
-            await deleteStoredFile(updatePayload.imageBase64 as string);
+            await deleteStoredFile(updatePayload.$set.imageUrl);
             return res.status(404).json({ message: "Category not found" });
           }
 
           if (clinic.dermaCategory.toString() !== category._id.toString()) {
-            await deleteStoredFile(updatePayload.imageBase64 as string);
+            await deleteStoredFile(updatePayload.$set.imageUrl);
             return res.status(400).json({
               message: "Selected clinic does not belong to the chosen category",
             });
           }
 
-          updatePayload.categoryId = category._id;
+          updatePayload.$set.categoryId = category._id;
         } else {
-          updatePayload.categoryId = clinic.dermaCategory;
+          updatePayload.$set.categoryId = clinic.dermaCategory;
         }
       }
 
@@ -144,13 +160,13 @@ router.put(
         new: true,
       });
       if (!updated) {
-        await deleteStoredFile(updatePayload.imageBase64 as string);
+        await deleteStoredFile(updatePayload.$set.imageUrl);
         return res.status(404).json({ message: "Offer not found" });
       }
 
-      await deleteStoredFile(existing.imageBase64);
+      await deleteStoredFile(existing.imageUrl || existing.imageBase64);
 
-      res.status(200).json(updated);
+      res.status(200).json(normalizeOfferPayload(updated));
     } catch (err) {
       if (req.file) {
         await deleteStoredFile(getUploadedPath(req.file));
@@ -163,11 +179,11 @@ router.put(
 // DELETE OFFER
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
-    const existing = await Offer3.findById(req.params.id);
+    const existing = await Offer3.findById(req.params.id).select("+imageBase64");
     const deleted = await Offer3.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ message: "Offer not found" });
 
-    await deleteStoredFile(existing?.imageBase64);
+    await deleteStoredFile(existing?.imageUrl || existing?.imageBase64);
 
     res.status(200).json({ message: "Offer deleted successfully" });
   } catch (err) {

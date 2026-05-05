@@ -2,6 +2,11 @@ import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
+import {
+  buildClinicAddressFromText,
+  cloneClinicAddresses,
+  parseClinicAddresses,
+} from "../utils/clinicAddresses";
 import { generateNextClinicCuc } from "../utils/clinicCuc";
 
 const generateToken = (id: string, role: string, contactNo?: string) => {
@@ -49,6 +54,7 @@ const buildClinicPayload = (clinic: any, contactNo?: string) => {
   const nextContactNo =
     clinic?.contactNumber || clinic?.contactNo || contactNo || "";
   const clinicId = clinic?._id?.toString?.() || clinic?.id || "";
+  const addresses = cloneClinicAddresses(clinic?.addresses);
 
   return {
     id: clinicId,
@@ -58,6 +64,10 @@ const buildClinicPayload = (clinic: any, contactNo?: string) => {
     contactNumber: nextContactNo,
     ownerName: clinic?.ownerName || "",
     slug: clinic?.slug || "",
+    clinicLogo: clinic?.clinicLogo || "",
+    profileImage: clinic?.clinicLogo || "",
+    address: addresses[0]?.address || clinic?.address || "",
+    addresses,
   };
 };
 
@@ -72,6 +82,7 @@ export const clinicMobileLogin = async (req: Request, res: Response) => {
     const ownerName = String(req.body?.ownerName ?? "").trim();
     const whatsapp = normalizeContactNumber(req.body?.whatsapp);
     const dermaCategoryInput = String(req.body?.dermaCategory ?? "").trim();
+    const parsedAddresses = parseClinicAddresses(req.body?.addresses);
 
     if (contactNo.length !== 10) {
       return res
@@ -113,6 +124,16 @@ export const clinicMobileLogin = async (req: Request, res: Response) => {
         slug: await buildUniqueClinicSlug(clinicName),
         dermaCategory: category,
         address,
+        addresses:
+          parsedAddresses.length > 0
+            ? parsedAddresses
+            : [
+                buildClinicAddressFromText(address, {
+                  type: "Clinic",
+                  fullName: clinicName,
+                  mobileNo: contactNo,
+                }),
+              ],
         email,
         contactNumber: contactNo,
         ownerName: ownerName || undefined,
@@ -121,14 +142,23 @@ export const clinicMobileLogin = async (req: Request, res: Response) => {
       });
     } else {
       const nextUpdates: Record<string, unknown> = {};
+      const hasAddressesField = Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "addresses"
+      );
+      const nextAddresses = hasAddressesField ? parsedAddresses : [];
 
       if (!clinic.contactNumber) nextUpdates.contactNumber = contactNo;
 
       if (!clinic.clinicName && clinicName) nextUpdates.clinicName = clinicName;
       if (!clinic.email && email) nextUpdates.email = email;
       if (!clinic.address && address) nextUpdates.address = address;
+      if (!clinic.address && parsedAddresses.length > 0) {
+        nextUpdates.address = parsedAddresses[0]?.address || address;
+      }
       if (!clinic.ownerName && ownerName) nextUpdates.ownerName = ownerName;
       if (!clinic.whatsapp && whatsapp) nextUpdates.whatsapp = whatsapp;
+      if (hasAddressesField) nextUpdates.addresses = nextAddresses;
 
       if (Object.keys(nextUpdates).length > 0) {
         clinic = await Clinic.findByIdAndUpdate(clinic._id, nextUpdates, {

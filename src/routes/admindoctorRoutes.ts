@@ -5,12 +5,18 @@ import Doctor from "../models/admindoctor";
 
 const router = express.Router();
 
+const normalizePhone = (value: unknown) =>
+  String(value ?? "")
+    .replace(/\D/g, "")
+    .trim();
+
 // CREATE doctor (unchanged)
 router.post("/", async (req: Request<{}, {}, any>, res: Response) => {
   try {
     const { title, firstName, lastName, specialist, email, phone, password } = req.body;
+    const cleanPhone = normalizePhone(phone);
 
-    if (!firstName || !lastName || !specialist || !email || !phone || !password)
+    if (!firstName || !lastName || !specialist || !email || !cleanPhone || !password)
       return res.status(400).json({ msg: "Please provide all required fields." });
 
     const existing = await Doctor.findOne({ email: email.toLowerCase() });
@@ -23,7 +29,7 @@ router.post("/", async (req: Request<{}, {}, any>, res: Response) => {
       lastName,
       specialist,
       email: email.toLowerCase(),
-      phone,
+      phone: cleanPhone,
       password: hashed,
       createdByAdmin: true,
     });
@@ -63,6 +69,10 @@ router.put("/:id", async (req: Request<{ id: string }>, res: Response) => {
       updateData.password = await bcrypt.hash(updateData.password, 10);
     } else {
       delete updateData.password;
+    }
+
+    if (typeof updateData.phone === "string") {
+      updateData.phone = normalizePhone(updateData.phone);
     }
 
     const updated = await Doctor.findByIdAndUpdate(

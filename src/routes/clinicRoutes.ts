@@ -3,6 +3,13 @@ import mongoose from "mongoose";
 import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
+import {
+  buildClinicAddressFromText,
+  formatClinicAddressText,
+  mergeClinicAddresses,
+  parseClinicAddresses,
+  type ClinicAddress,
+} from "../utils/clinicAddresses";
 import { generateNextClinicCuc } from "../utils/clinicCuc";
 
 const router = express.Router();
@@ -119,6 +126,33 @@ const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] =>
   return files.map((file) => `/uploads/${file.filename}`);
 };
 
+const hasOwn = (obj: Record<string, unknown> | undefined, key: string) =>
+  Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
+
+const buildClinicAddressesFromRequest = (
+  body: Record<string, unknown> | undefined,
+  fallbackAddress: string,
+  clinicName: string,
+  contactNumber: string
+): ClinicAddress[] => {
+  const parsedAddresses = parseClinicAddresses(body?.addresses);
+  if (parsedAddresses.length > 0) {
+    return mergeClinicAddresses([], parsedAddresses);
+  }
+
+  if (fallbackAddress.trim()) {
+    return [
+      buildClinicAddressFromText(fallbackAddress, {
+        type: "Clinic",
+        fullName: clinicName,
+        mobileNo: contactNumber,
+      }),
+    ];
+  }
+
+  return [];
+};
+
 const stripHeavyClinicFields = (clinic: any) => {
   const clone =
     typeof clinic?.toObject === "function" ? clinic.toObject() : { ...clinic };
@@ -160,6 +194,7 @@ router.post(
       clinicName,
       dermaCategory,
       address,
+      addresses: _addresses,
       email,
       contactNo,
       contactNumber,
@@ -182,6 +217,14 @@ router.post(
       normalizeContactNumber(contactNumber) ||
       normalizeContactNumber(contactNo);
     const nextCuc = await generateNextClinicCuc();
+    const clinicAddresses = buildClinicAddressesFromRequest(
+      req.body,
+      String(address).trim(),
+      String(clinicName).trim(),
+      normalizedContactNumber
+    );
+    const nextAddressText =
+      clinicAddresses[0]?.address || formatClinicAddressText(clinicAddresses[0]) || String(address).trim();
 
     const uploadedClinicLogo = getUploadedPaths(files?.clinicLogo);
     const uploadedBannerImage = getUploadedPaths(files?.bannerImage);
@@ -195,7 +238,8 @@ router.post(
       clinicName: String(clinicName).trim(),
       slug: await buildUniqueClinicSlug(String(clinicName).trim()),
       dermaCategory,
-      address: String(address).trim(),
+      address: nextAddressText,
+      addresses: clinicAddresses,
       email: String(email).trim(),
       ...(normalizedContactNumber ? { contactNumber: normalizedContactNumber } : {}),
       doctors: parsedDoctors,
@@ -327,11 +371,35 @@ router.put(
     const parsedSpecialOffers = parseStringArray(req.body?.specialOffers);
     const parsedPhotos = parseStringArray(req.body?.photos);
     const parsedCertifications = parseStringArray(req.body?.certifications);
+    const hasAddressesField = hasOwn(req.body, "addresses");
+    const parsedAddresses = parseClinicAddresses(req.body?.addresses);
+    const nextAddresses = hasAddressesField
+      ? mergeClinicAddresses([], parsedAddresses)
+      : Array.isArray(existingClinic.addresses)
+      ? mergeClinicAddresses([], existingClinic.addresses)
+      : String(req.body?.address || "").trim()
+      ? [
+          buildClinicAddressFromText(String(req.body?.address || "").trim(), {
+            type: "Clinic",
+            fullName: nextClinicName,
+            mobileNo: normalizedContactNumber || existingClinic.contactNumber || "",
+          }),
+        ]
+      : [];
+    const nextAddressText = hasAddressesField
+      ? String(req.body?.address || "").trim() ||
+        formatClinicAddressText(nextAddresses[0]) ||
+        ""
+      : String(req.body?.address || "").trim() || existingClinic.address || "";
 
     const updated = await Clinic.findByIdAndUpdate(
       req.params.id,
       {
         ...req.body,
+        address: nextAddressText,
+        ...(hasAddressesField || nextAddresses.length
+          ? { addresses: nextAddresses }
+          : {}),
         ...(normalizedContactNumber ? { contactNumber: normalizedContactNumber } : {}),
         slug: nextSlug,
         doctors: parsedDoctors,

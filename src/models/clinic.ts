@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import type { ClinicAddress } from "../utils/clinicAddresses";
 
 interface IDoctor {
   name: string;
@@ -23,6 +24,7 @@ export interface IClinic extends Document {
   certifications?: string[];
   doctors: IDoctor[];
   address: string;
+  addresses?: ClinicAddress[];
   city?: string;
   services?: string;
   sector?: string;
@@ -55,6 +57,22 @@ const DoctorSchema = new Schema<IDoctor>(
   { _id: false }
 );
 
+const ClinicAddressSchema = new Schema<ClinicAddress>(
+  {
+    type: { type: String, default: "Clinic" },
+    address: { type: String, default: "" },
+    fullName: { type: String, default: "" },
+    mobileNo: { type: String, default: "" },
+    houseNo: { type: String, default: "" },
+    street: { type: String, default: "" },
+    localArea: { type: String, default: "" },
+    pincode: { type: String, default: "" },
+    district: { type: String, default: "" },
+    state: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const ClinicSchema = new Schema<IClinic>(
   {
     cuc: { type: String, required: true, unique: true },
@@ -82,6 +100,7 @@ const ClinicSchema = new Schema<IClinic>(
     doctors: [DoctorSchema],
 
     address: { type: String, required: true },
+    addresses: { type: [ClinicAddressSchema], default: [] },
     city: String,
     services: String,
     sector: String,

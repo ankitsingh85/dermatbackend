@@ -311,9 +311,13 @@ router.post(
   }
 );
 
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const plans = await TreatmentPlan.find()
+    const includeInactive =
+      String(req.query.includeInactive || "").toLowerCase() === "true";
+    const plans = await TreatmentPlan.find(
+      includeInactive ? {} : { isActive: { $ne: false } }
+    )
       .populate("clinic", "clinicName email")
       .sort({ createdAt: -1 });
 
@@ -330,21 +334,30 @@ router.get("/", async (_req, res) => {
 router.get("/:identifier", async (req, res) => {
   try {
     const identifier = req.params.identifier;
+    const includeInactive =
+      String(req.query.includeInactive || "").toLowerCase() === "true";
+    const visibilityFilter = includeInactive ? {} : { isActive: { $ne: false } };
 
-    let plan = await TreatmentPlan.findOne({ slug: identifier }).populate(
+    let plan = await TreatmentPlan.findOne({
+      slug: identifier,
+      ...visibilityFilter,
+    }).populate(
       "clinic",
       "clinicName email"
     );
 
     if (!plan && mongoose.isValidObjectId(identifier)) {
-      plan = await TreatmentPlan.findById(identifier).populate(
+      plan = await TreatmentPlan.findOne({
+        _id: identifier,
+        ...visibilityFilter,
+      }).populate(
         "clinic",
         "clinicName email"
       );
     }
 
     if (!plan) {
-      const plans = await TreatmentPlan.find()
+      const plans = await TreatmentPlan.find(visibilityFilter)
         .populate("clinic", "clinicName email")
         .sort({ createdAt: -1 });
       const matched = (plans as any[]).find(

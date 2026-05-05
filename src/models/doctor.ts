@@ -5,11 +5,26 @@ export interface IDoctor extends Document {
   title: string;
   firstName: string;
   lastName: string;
+  doctorCode: string;
   specialist: string;
   email: string;
   phone?: string;
   password: string;
   description?: string;
+  profileImage?: string;
+  address?: string;
+  addresses?: {
+    type: string;
+    address?: string;
+    fullName?: string;
+    mobileNo?: string;
+    houseNo?: string;
+    street?: string;
+    localArea?: string;
+    pincode?: string;
+    district?: string;
+    state?: string;
+  }[];
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -31,6 +46,15 @@ const DoctorSchema = new Schema<IDoctor>(
       type: String,
       required: true,
       trim: true,
+    },
+
+    doctorCode: {
+      type: String,
+      required: true,
+      unique: true,
+      sparse: true,
+      trim: true,
+      uppercase: true,
     },
 
     specialist: {
@@ -62,6 +86,32 @@ const DoctorSchema = new Schema<IDoctor>(
       type: String,
       trim: true,
     },
+
+    profileImage: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    address: {
+      type: String,
+      trim: true,
+    },
+
+    addresses: [
+      {
+        type: { type: String, default: "Office", trim: true },
+        address: { type: String, trim: true },
+        fullName: { type: String, trim: true },
+        mobileNo: { type: String, trim: true },
+        houseNo: { type: String, trim: true },
+        street: { type: String, trim: true },
+        localArea: { type: String, trim: true },
+        pincode: { type: String, trim: true },
+        district: { type: String, trim: true },
+        state: { type: String, trim: true },
+      },
+    ],
   },
   { timestamps: true }
 );

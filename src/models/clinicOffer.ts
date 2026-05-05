@@ -1,7 +1,8 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
 export interface IOffer3 extends Document {
-  imageBase64: string;
+  imageUrl: string;
+  imageBase64?: string;
   clinicId?: Types.ObjectId;
   categoryId?: Types.ObjectId;
   createdAt?: Date;
@@ -10,7 +11,8 @@ export interface IOffer3 extends Document {
 
 const Offer3Schema = new Schema<IOffer3>(
   {
-    imageBase64: { type: String, required: true },
+    imageUrl: { type: String, required: true, trim: true },
+    imageBase64: { type: String, trim: true, select: false },
     clinicId: {
       type: Schema.Types.ObjectId,
       ref: "Clinic",

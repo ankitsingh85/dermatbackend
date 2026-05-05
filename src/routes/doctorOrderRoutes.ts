@@ -1,7 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
-import Order from "../models/order";
-// import UserProfile from "../models/userinformation";
+import DoctorOrder from "../models/doctorOrder";
 
 const router = express.Router();
 
@@ -62,30 +61,21 @@ const matchesOrderType = (order: any, requestedType?: string) => {
   );
 };
 
-/** ✅ Create new order */
 router.post("/", async (req, res) => {
   try {
-    const { userId, clinicId, products, totalAmount, address, orderType, ownerType } = req.body;
+    const { doctorId, products, totalAmount, address, orderType } = req.body;
 
-    if ((!userId && !clinicId) || !products || !totalAmount || !address) {
+    if (!doctorId || !products || !totalAmount || !address) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: "Invalid userId" });
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ message: "Invalid doctorId" });
     }
 
-    if (clinicId && !mongoose.Types.ObjectId.isValid(clinicId)) {
-      return res.status(400).json({ message: "Invalid clinicId" });
-    }
-
-    // const user = await UserProfile.findById(userId);
-    // if (!user) return res.status(404).json({ message: "User not found" });
-
-    const order = new Order({
-      userId: userId || undefined,
-      clinicId: clinicId || undefined,
-      ownerType: ownerType === "clinic" ? "clinic" : "user",
+    const order = new DoctorOrder({
+      doctorId,
+      ownerType: "doctor",
       products,
       totalAmount,
       address,
@@ -96,72 +86,53 @@ router.post("/", async (req, res) => {
     const savedOrder = await order.save();
     res.status(201).json(savedOrder);
   } catch (err: any) {
-    console.error("❌ Error creating order:", err.message);
-    res.status(500).json({ message: "Failed to create order", error: err.message });
+    console.error("Doctor order create error:", err.message);
+    res.status(500).json({ message: "Failed to create doctor order", error: err.message });
   }
 });
 
-/** ✅ USER: Get orders for logged-in user */
-/** ✅ USER: Get orders for logged-in user */
 router.get("/my", async (req, res) => {
   try {
-    const userId = req.headers["x-user-id"] as string;
-    const clinicId = req.headers["x-clinic-id"] as string;
-    const ownerType = String(req.headers["x-owner-type"] || "").toLowerCase();
+    const doctorId = req.headers["x-doctor-id"] as string;
     const requestedType = req.query.orderType as string | undefined;
 
-    if (!userId && !clinicId) {
-      return res.status(401).json({ message: "User or clinic ID missing" });
+    if (!doctorId) {
+      return res.status(401).json({ message: "Doctor ID missing" });
     }
 
-    if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: "Invalid user ID" });
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ message: "Invalid doctor ID" });
     }
 
-    if (clinicId && !mongoose.Types.ObjectId.isValid(clinicId)) {
-      return res.status(400).json({ message: "Invalid clinic ID" });
-    }
-
-    const query: any = {};
-    if (ownerType === "clinic" || clinicId) {
-      query.clinicId = clinicId;
-    } else {
-      query.userId = userId;
-    }
-
-    const orders = await Order.find(query)
-      .populate("userId", "name email")
-      .populate("clinicId", "clinicName email address contactNumber")
+    const orders = await DoctorOrder.find({ doctorId })
+      .populate("doctorId", "title firstName lastName email phone address")
       .sort({ createdAt: -1 });
 
     return res
       .status(200)
       .json(requestedType ? orders.filter((order) => matchesOrderType(order, requestedType)) : orders);
   } catch (err: any) {
-    console.error("❌ Error fetching orders:", err.message);
-    return res.status(500).json({ message: "Failed to fetch orders", error: err.message });
+    console.error("Doctor order fetch error:", err.message);
+    return res.status(500).json({ message: "Failed to fetch doctor orders", error: err.message });
   }
 });
 
-/** ✅ ADMIN: Get all orders (from all users) */
-router.get("/all", async (_req, res) => {
+router.get("/all", async (req, res) => {
   try {
-    const requestedType = _req.query.orderType as string | undefined;
-    const orders = await Order.find()
-      .populate("userId", "name email image")
-      .populate("clinicId", "clinicName email address contactNumber")
+    const requestedType = req.query.orderType as string | undefined;
+    const orders = await DoctorOrder.find()
+      .populate("doctorId", "title firstName lastName email phone address")
       .sort({ createdAt: -1 });
 
-    res
+    return res
       .status(200)
       .json(requestedType ? orders.filter((order) => matchesOrderType(order, requestedType)) : orders);
   } catch (err: any) {
-    console.error("❌ Error fetching all orders:", err.message);
-    res.status(500).json({ message: "Failed to fetch all orders", error: err.message });
+    console.error("Doctor order all fetch error:", err.message);
+    return res.status(500).json({ message: "Failed to fetch doctor orders", error: err.message });
   }
 });
 
-/** ✅ ADMIN: Update order status */
 router.put("/:orderId/status", async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -172,16 +143,16 @@ router.put("/:orderId/status", async (req, res) => {
       return res.status(400).json({ message: "Invalid order status" });
     }
 
-    const order = await Order.findById(orderId);
-    if (!order) return res.status(404).json({ message: "Order not found" });
+    const order = await DoctorOrder.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Doctor order not found" });
 
-    (order as any).status = status;
+    order.status = status;
     await order.save();
 
-    res.status(200).json({ message: "Order status updated", order });
+    res.status(200).json({ message: "Doctor order status updated", order });
   } catch (err: any) {
-    console.error("❌ Error updating order status:", err.message);
-    res.status(500).json({ message: "Failed to update order status", error: err.message });
+    console.error("Doctor order status error:", err.message);
+    res.status(500).json({ message: "Failed to update doctor order status", error: err.message });
   }
 });
 
