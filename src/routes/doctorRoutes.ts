@@ -381,34 +381,60 @@ router.delete("/:id", async (req, res) => {
   }
 });
 /* ================= CHECK DOCTOR MOBILE ================= */
+/* ================= CHECK DOCTOR MOBILE ================= */
 router.post("/check-mobile", async (req, res) => {
+
   try {
+
     const phone = normalizePhone(
-      req.body?.contactNo ?? req.body?.phone ?? req.body?.mobileNo
+      req.body?.contactNo ??
+      req.body?.phone ??
+      req.body?.mobileNo
     );
 
     if (phone.length !== 10) {
+
       return res.status(400).json({
         message: "Enter valid mobile number",
         exists: false,
       });
     }
 
-    const doctor = await findDoctorByPhone(phone);
+    const doctor =
+      await findDoctorByPhone(phone);
 
     if (!doctor) {
+
       return res.status(404).json({
         exists: false,
         message: "Doctor is not registered",
       });
     }
 
+    // ✅ TOKEN
+    const token = generateToken(
+      doctor._id.toString(),
+      "doctor",
+      phone
+    );
+
+    // ✅ RETURN FULL DOCTOR
     return res.status(200).json({
       exists: true,
       message: "Doctor exists",
+      token,
+      role: "doctor",
+
+      doctor: buildDoctorPayload(
+        doctor,
+        phone
+      ),
     });
 
   } catch (err) {
+
+    console.log(err);
+
     return res.status(500).json({
       exists: false,
       message: "Server error",
