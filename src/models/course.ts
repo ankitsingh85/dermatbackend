@@ -48,10 +48,6 @@ const CourseSchema = new Schema<CourseDocument>(
       type: String,
       required: true,
       trim: true,
-      validate: {
-        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
-        message: "Course name should contain only letters and spaces",
-      },
     },
     courseUniqueCode: { type: String, required: true, trim: true, unique: true },
     courseType: { type: String, required: true, trim: true },

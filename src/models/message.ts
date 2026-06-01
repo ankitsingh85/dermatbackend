@@ -9,6 +9,19 @@ const messageSchema = new mongoose.Schema(
     senderId: String,
     receiverId: String,
     message: String,
+    messageType: {
+      type: String,
+      enum: ["text", "call"],
+      default: "text",
+    },
+    callType: {
+      type: String,
+      enum: ["audio", "video"],
+    },
+    callStatus: {
+      type: String,
+      enum: ["started", "missed", "ended"],
+    },
     seen: { type: Boolean, default: false },
   },
   { timestamps: true }

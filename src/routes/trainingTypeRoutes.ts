@@ -4,10 +4,29 @@ import TrainingType from "../models/trainingType";
 
 const router = express.Router();
 
+const escapeRegex = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getNextTrainingTypeId = async () => {
+  const trainingTypes = await TrainingType.find({})
+    .select("id")
+    .lean();
+
+  const maxId = trainingTypes.reduce((max, item) => {
+    const match = item.id?.match(/^ttype-(\d+)$/);
+    if (!match) return max;
+
+    const num = Number.parseInt(match[1], 10);
+    return Number.isNaN(num) ? max : Math.max(max, num);
+  }, 0);
+
+  return `ttype-${maxId + 1}`;
+};
+
 router.get("/", async (_req, res) => {
   try {
     const trainingTypes = await TrainingType.find({})
-      .select("name imageUrl createdAt")
+      .select("id name imageUrl createdAt")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -31,14 +50,17 @@ router.post("/", upload.single("imageUrl"), async (req, res) => {
     }
 
     const existing = await TrainingType.findOne({
-      name: { $regex: new RegExp(`^${String(name).trim()}$`, "i") },
+      name: { $regex: new RegExp(`^${escapeRegex(String(name).trim())}$`, "i") },
     }).lean();
 
     if (existing) {
       return res.status(409).json({ message: "Training type already exists" });
     }
 
+    const newId = await getNextTrainingTypeId();
+
     const trainingType = new TrainingType({
+      id: newId,
       name: String(name).trim(),
       imageUrl: uploadedImageUrl || legacyImageUrl,
     });
@@ -65,7 +87,7 @@ router.put("/:mongoId", upload.single("imageUrl"), async (req, res) => {
 
     const duplicate = await TrainingType.findOne({
       _id: { $ne: req.params.mongoId },
-      name: { $regex: new RegExp(`^${String(name).trim()}$`, "i") },
+      name: { $regex: new RegExp(`^${escapeRegex(String(name).trim())}$`, "i") },
     }).lean();
 
     if (duplicate) {

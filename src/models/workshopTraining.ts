@@ -46,10 +46,6 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
       type: String,
       required: true,
       trim: true,
-      validate: {
-        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
-        message: "Training name should contain only letters and spaces",
-      },
     },
     trainingUniqueCode: { type: String, required: true, trim: true, unique: true },
     trainingType: { type: String, required: true, trim: true },

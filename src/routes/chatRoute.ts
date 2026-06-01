@@ -1,5 +1,6 @@
 import express from "express";
 import Chat from "../models/chat";
+import Message from "../models/message";
 
 const router = express.Router();
 
@@ -68,6 +69,38 @@ router.patch("/:chatId/status", async (req, res) => {
     await chat.save();
 
     res.json(formatChatForDoctor(chat));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete("/:chatId", async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { doctorId, userId } = req.body;
+
+    const chat = await Chat.findById(chatId);
+
+    if (!chat) {
+      return res.status(404).json({ error: "Chat request not found." });
+    }
+
+    const isDoctor = doctorId && String(chat.doctorId) === String(doctorId);
+    const isUser = userId && String(chat.userId) === String(userId);
+
+    if (!isDoctor && !isUser) {
+      return res.status(403).json({ error: "You cannot delete this chat." });
+    }
+
+    await Message.deleteMany({ chatId });
+    await Chat.findByIdAndDelete(chatId);
+
+    res.json({
+      success: true,
+      chatId,
+      doctorId: String(chat.doctorId),
+      userId: String(chat.userId),
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

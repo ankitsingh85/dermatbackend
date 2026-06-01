@@ -1,5 +1,4 @@
 import mongoose, { Schema, Document } from "mongoose";
-import bcrypt from "bcryptjs";
 
 export interface IDoctor extends Document {
   title: string;
@@ -9,7 +8,6 @@ export interface IDoctor extends Document {
   specialist: string;
   email: string;
   phone?: string;
-  password: string;
   description?: string;
   profileImage?: string;
   address?: string;
@@ -25,7 +23,6 @@ export interface IDoctor extends Document {
     district?: string;
     state?: string;
   }[];
-  comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
 const DoctorSchema = new Schema<IDoctor>(
@@ -76,12 +73,6 @@ const DoctorSchema = new Schema<IDoctor>(
       trim: true,
     },
 
-    password: {
-      type: String,
-      required: true,
-      select: false,
-    },
-
     description: {
       type: String,
       trim: true,
@@ -115,19 +106,5 @@ const DoctorSchema = new Schema<IDoctor>(
   },
   { timestamps: true }
 );
-
-/* ===== HASH PASSWORD ===== */
-DoctorSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
-  this.password = await bcrypt.hash(this.password, 10);
-  next();
-});
-
-/* ===== COMPARE PASSWORD ===== */
-DoctorSchema.methods.comparePassword = async function (
-  candidatePassword: string
-) {
-  return bcrypt.compare(candidatePassword, this.password);
-};
 
 export default mongoose.model<IDoctor>("Doctor", DoctorSchema);

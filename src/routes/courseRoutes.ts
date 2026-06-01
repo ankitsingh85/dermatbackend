@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express";
 import upload from "../middleware/uploads";
 import Course from "../models/course";
+import Sequence from "../models/clinicSequence";
 
 const router = express.Router();
 
@@ -26,6 +27,7 @@ const stripHtml = (value: unknown) =>
 const numberFields = ["feesInr", "netFeesInr", "maximumSeatsBatchSize"] as const;
 const dateFields = ["startDate", "endDate", "registrationDeadline"] as const;
 const courseCodePrefix = "DRMC";
+const courseCodeCounter = "courseUniqueCode";
 
 const parseStringArray = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -73,17 +75,70 @@ const parseBoolean = (value: unknown, fallback: boolean) => {
   return fallback;
 };
 
-const getNextCourseCode = async () => {
-  const latestCourse = await Course.findOne({
+const getHighestExistingCourseCodeNumber = async () => {
+  const courses = await Course.find({
     courseUniqueCode: new RegExp(`^${courseCodePrefix}\\d{4,}$`),
   })
-    .sort({ courseUniqueCode: -1 })
-    .select("courseUniqueCode");
+    .select("courseUniqueCode")
+    .lean();
 
-  const latestNumber = latestCourse?.courseUniqueCode.match(/(\d+)$/)?.[1];
-  const nextNumber = latestNumber ? Number(latestNumber) + 1 : 1;
+  return courses.reduce((highest, course) => {
+    const codeNumber = Number(course.courseUniqueCode.match(/(\d+)$/)?.[1] || 0);
+    return Number.isFinite(codeNumber) ? Math.max(highest, codeNumber) : highest;
+  }, 0);
+};
 
-  return `${courseCodePrefix}${String(nextNumber).padStart(4, "0")}`;
+const ensureCourseCodeCounter = async () => {
+  const highestExisting = await getHighestExistingCourseCodeNumber();
+  const sequence = await Sequence.findOneAndUpdate(
+    { name: courseCodeCounter },
+    { $max: { seq: highestExisting }, $setOnInsert: { name: courseCodeCounter } },
+    { new: true, upsert: true }
+  );
+
+  return sequence.seq;
+};
+
+const formatCourseCode = (value: number) =>
+  `${courseCodePrefix}${String(value).padStart(4, "0")}`;
+
+const getNextCourseCode = async () => {
+  const currentSequence = await ensureCourseCodeCounter();
+  return formatCourseCode(currentSequence + 1);
+};
+
+const parseCourseCodeNumber = (value: string) => {
+  const match = new RegExp(`^${courseCodePrefix}(\\d{4,})$`).exec(value);
+  if (!match) return null;
+
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const reserveNextCourseCode = async () => {
+  await ensureCourseCodeCounter();
+  const sequence = await Sequence.findOneAndUpdate(
+    { name: courseCodeCounter },
+    { $inc: { seq: 1 } },
+    { new: true }
+  );
+
+  if (!sequence) {
+    throw new Error("Failed to generate course code");
+  }
+
+  return formatCourseCode(sequence.seq);
+};
+
+const markCourseCodeUsed = async (courseUniqueCode: string) => {
+  const codeNumber = parseCourseCodeNumber(courseUniqueCode);
+  if (!codeNumber) return;
+
+  await ensureCourseCodeCounter();
+  await Sequence.updateOne(
+    { name: courseCodeCounter },
+    { $max: { seq: codeNumber } }
+  );
 };
 
 const normalizePayload = (
@@ -213,13 +268,6 @@ const validateCoursePayload = (
     if (payload[field] === "INVALID_DATE") {
       return { message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid date` };
     }
-  }
-
-  if (
-    payload.courseName !== undefined &&
-    !textOnlyRegex.test(stripHtml(payload.courseName))
-  ) {
-    return { message: "Course name should contain only letters and spaces" };
   }
 
   if (
@@ -353,7 +401,24 @@ router.post(
       }
 
       const requestedCode = String(payload.courseUniqueCode || "").trim();
-      payload.courseUniqueCode = requestedCode || (await getNextCourseCode());
+
+      if (requestedCode) {
+        const requestedCodeNumber = parseCourseCodeNumber(requestedCode);
+        if (!requestedCodeNumber) {
+          return res.status(400).json({ message: "Invalid course unique code" });
+        }
+
+        const highestUsedCodeNumber = await ensureCourseCodeCounter();
+        if (requestedCodeNumber <= highestUsedCodeNumber) {
+          return res.status(409).json({
+            message: "Course unique code was already used. Please refresh and try again.",
+          });
+        }
+
+        payload.courseUniqueCode = requestedCode;
+      } else {
+        payload.courseUniqueCode = await reserveNextCourseCode();
+      }
 
       const existingCourse = await Course.findOne({
         courseUniqueCode: String(payload.courseUniqueCode).trim(),
@@ -370,6 +435,7 @@ router.post(
       });
 
       await course.save();
+      await markCourseCodeUsed(course.courseUniqueCode);
       return res.status(201).json(course);
     } catch (err: any) {
       console.error("Create course error:", err);

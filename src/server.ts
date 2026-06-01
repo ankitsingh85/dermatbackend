@@ -37,6 +37,9 @@ import courseTypeRoutes from "./routes/courseTypeRoutes";
 import leadRoutes from "./routes/leadRoutes";
 import workshopTrainingRoutes from "./routes/workshopTrainingRoutes";
 import trainingTypeRoutes from "./routes/trainingTypeRoutes";
+import clinicHiringRequestRoutes from "./routes/clinicHiringRequestRoutes";
+import Chat from "./models/chat";
+import Message from "./models/message";
 
 // ✅ CHAT ROUTES
 import chatRoutes from "./routes/chatRoute";
@@ -99,6 +102,7 @@ app.use("/api/course-types", courseTypeRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/workshop-trainings", workshopTrainingRoutes);
 app.use("/api/training-types", trainingTypeRoutes);
+app.use("/api/hiring-requests", clinicHiringRequestRoutes);
 
 
 // ✅ CHAT ROUTES
@@ -170,17 +174,81 @@ io.on("connection", (socket) => {
     }
   });
 
-  const relayCallSignal = (eventName: string, data: { to?: string }) => {
-    if (!data?.to) return;
-
+  socket.on("chat_deleted", (data) => {
     const receiverSocket = users.get(data.to);
 
     if (receiverSocket) {
-      io.to(receiverSocket).emit(eventName, data);
+      io.to(receiverSocket).emit("chat_deleted", data);
+    }
+  });
+
+  const emitToUser = (userId: string | undefined, eventName: string, data: any) => {
+    if (!userId) return;
+
+    const userSocket = users.get(userId);
+
+    if (userSocket) {
+      io.to(userSocket).emit(eventName, data);
     }
   };
 
-  socket.on("call:invite", (data) => relayCallSignal("call:invite", data));
+  const createCallHistoryMessage = async (data: {
+    chatId?: string;
+    from?: string;
+    to?: string;
+    callType?: "audio" | "video";
+  }) => {
+    if (!data.chatId || !data.from || !data.to) return null;
+
+    const label = data.callType === "audio" ? "Audio call" : "Video call";
+    const message = await Message.create({
+      chatId: data.chatId,
+      senderId: data.from,
+      receiverId: data.to,
+      message: `${label} started`,
+      messageType: "call",
+      callType: data.callType || "video",
+      callStatus: "started",
+    });
+
+    await Chat.findByIdAndUpdate(data.chatId, {
+      lastMessage: message.message,
+    });
+
+    return {
+      _id: String(message._id),
+      chatId: String(message.chatId),
+      senderId: message.senderId,
+      receiverId: message.receiverId,
+      message: message.message,
+      messageType: message.messageType,
+      callType: message.callType,
+      callStatus: message.callStatus,
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
+    };
+  };
+
+  const relayCallSignal = (eventName: string, data: { to?: string }) => {
+    if (!data?.to) return;
+
+    emitToUser(data.to, eventName, data);
+  };
+
+  socket.on("call:invite", async (data) => {
+    try {
+      const callMessage = await createCallHistoryMessage(data);
+
+      if (callMessage) {
+        emitToUser(data.from, "receive_message", callMessage);
+        emitToUser(data.to, "receive_message", callMessage);
+      }
+    } catch (err) {
+      console.error("Call history save error:", err);
+    }
+
+    relayCallSignal("call:invite", data);
+  });
   socket.on("call:accepted", (data) => relayCallSignal("call:accepted", data));
   socket.on("call:rejected", (data) => relayCallSignal("call:rejected", data));
   socket.on("call:offer", (data) => relayCallSignal("call:offer", data));

@@ -1,5 +1,4 @@
 import express from "express";
-import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Doctor from "../models/doctor";
 import { doctorAuth, DoctorAuthRequest } from "../middleware/authDoctor";
@@ -194,7 +193,7 @@ router.get("/me", doctorAuth, async (req: DoctorAuthRequest, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const doctor = await Doctor.findById(doctorId).select("-password");
+    const doctor = await Doctor.findById(doctorId);
     if (!doctor) {
       return res.status(404).json({ message: "Doctor not found" });
     }
@@ -228,7 +227,6 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       specialist,
       email,
       phone,
-      password,
       description,
     } = req.body;
     const uploadedProfileImage = getUploadedPath(req.file);
@@ -247,8 +245,7 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       !cleanLastName ||
       !cleanSpecialist ||
       !cleanEmail ||
-      !cleanPhone ||
-      !password
+      !cleanPhone
     ) {
       return res.status(400).json({ message: "All required fields missing" });
     }
@@ -266,7 +263,6 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       specialist: cleanSpecialist,
       email: cleanEmail,
       phone: cleanPhone,
-      password,
       description: cleanDescription || undefined,
       profileImage: uploadedProfileImage || "",
     });
@@ -277,7 +273,6 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       message: "Doctor created successfully",
       doctor: {
         ...doctor.toObject(),
-        password: undefined,
       },
     });
   } catch (error) {
@@ -288,9 +283,7 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
 /* ================= LIST DOCTORS ================= */
 router.get("/", async (_req, res) => {
   try {
-    const doctors = await Doctor.find()
-      .select("-password")
-      .sort({ createdAt: -1 });
+    const doctors = await Doctor.find().sort({ createdAt: -1 });
 
     res.json(doctors);
   } catch (error) {
@@ -301,10 +294,9 @@ router.get("/", async (_req, res) => {
 /* ================= UPDATE DOCTOR ================= */
 router.put("/:id", upload.single("profileImage"), async (req, res) => {
   try {
-    const { password, ...rest } = req.body;
     const uploadedProfileImage = getUploadedPath(req.file);
 
-    const updateData: any = { ...rest };
+    const updateData: any = { ...req.body };
 
     if (typeof updateData.title === "string") {
       updateData.title = normalizeText(updateData.title);
@@ -343,16 +335,11 @@ router.put("/:id", upload.single("profileImage"), async (req, res) => {
       updateData.profileImage = uploadedProfileImage;
     }
 
-    if (password && String(password).trim() !== "") {
-      const salt = await bcrypt.genSalt(10);
-      updateData.password = await bcrypt.hash(password, salt);
-    }
-
     const updatedDoctor = await Doctor.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
-    ).select("-password");
+    );
 
     if (!updatedDoctor) {
       return res.status(404).json({ message: "Doctor not found" });
@@ -380,7 +367,6 @@ router.delete("/:id", async (req, res) => {
     res.status(500).json({ message: "Server error", error });
   }
 });
-/* ================= CHECK DOCTOR MOBILE ================= */
 /* ================= CHECK DOCTOR MOBILE ================= */
 router.post("/check-mobile", async (req, res) => {
 

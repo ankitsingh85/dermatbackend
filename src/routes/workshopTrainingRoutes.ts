@@ -221,10 +221,6 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
     }
   }
 
-  if (payload.trainingName !== undefined && !textOnlyRegex.test(stripHtml(payload.trainingName))) {
-    return { message: "Training name should contain only letters and spaces" };
-  }
-
   if (
     payload.instituteName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.instituteName))

@@ -4,6 +4,25 @@ import upload from "../middleware/uploads";
 
 const router = express.Router();
 
+const escapeRegex = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getNextClinicCategoryId = async () => {
+  const categories = await ClinicCategory.find({})
+    .select("categoryId")
+    .lean();
+
+  const maxId = categories.reduce((max, category) => {
+    const match = category.categoryId?.match(/^ccat-(\d+)$/);
+    if (!match) return max;
+
+    const num = Number.parseInt(match[1], 10);
+    return Number.isNaN(num) ? max : Math.max(max, num);
+  }, 0);
+
+  return `ccat-${maxId + 1}`;
+};
+
 router.post("/", upload.single("imageUrl"), async (req, res) => {
   try {
     const { name } = req.body;
@@ -11,7 +30,7 @@ router.post("/", upload.single("imageUrl"), async (req, res) => {
     const legacyImageUrl =
       typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
 
-    if (!name) {
+    if (!name?.trim()) {
       return res.status(400).json({ message: "Category name is required" });
     }
 
@@ -19,8 +38,19 @@ router.post("/", upload.single("imageUrl"), async (req, res) => {
       return res.status(400).json({ message: "Category image is required" });
     }
 
+    const existing = await ClinicCategory.findOne({
+      name: { $regex: new RegExp(`^${escapeRegex(String(name).trim())}$`, "i") },
+    }).lean();
+
+    if (existing) {
+      return res.status(409).json({ message: "Clinic category already exists" });
+    }
+
+    const categoryId = await getNextClinicCategoryId();
+
     const category = new ClinicCategory({
-      name,
+      categoryId,
+      name: String(name).trim(),
       imageUrl: uploadedImageUrl || legacyImageUrl,
     });
 
@@ -34,7 +64,11 @@ router.post("/", upload.single("imageUrl"), async (req, res) => {
 
 router.get("/", async (_req, res) => {
   try {
-    const categories = await ClinicCategory.find().sort({ createdAt: -1 });
+    const categories = await ClinicCategory.find()
+      .select("categoryId name imageUrl createdAt")
+      .sort({ createdAt: -1 })
+      .lean();
+
     res.json(categories);
   } catch (error) {
     res.status(500).json({ message: "Server error" });
@@ -48,12 +82,21 @@ router.put("/:id", upload.single("imageUrl"), async (req, res) => {
     const legacyImageUrl =
       typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim() : "";
 
-    if (!name) {
+    if (!name?.trim()) {
       return res.status(400).json({ message: "Category name is required" });
     }
 
+    const duplicate = await ClinicCategory.findOne({
+      _id: { $ne: req.params.id },
+      name: { $regex: new RegExp(`^${escapeRegex(String(name).trim())}$`, "i") },
+    }).lean();
+
+    if (duplicate) {
+      return res.status(409).json({ message: "Clinic category already exists" });
+    }
+
     const updateData: Record<string, string> = {
-      name,
+      name: String(name).trim(),
     };
 
     if (uploadedImageUrl || legacyImageUrl) {

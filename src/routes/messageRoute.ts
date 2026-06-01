@@ -24,6 +24,7 @@ router.post("/send", async (req, res) => {
       senderId,
       receiverId,
       message,
+      messageType: "text",
     });
 
     await Chat.findByIdAndUpdate(chatId, {
