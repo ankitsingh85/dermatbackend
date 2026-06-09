@@ -46,6 +46,8 @@ export interface IClinic extends Document {
   facebook?: string;
   standardPlanLink?: string;
   clinicStatus?: string;
+  verifiedBadge?: boolean;
+  isActive?: boolean;
 }
 
 const DoctorSchema = new Schema<IDoctor>(
@@ -131,6 +133,8 @@ const ClinicSchema = new Schema<IClinic>(
     standardPlanLink: String,
 
     clinicStatus: { type: String, default: "Open" },
+    verifiedBadge: { type: Boolean, default: false },
+    isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

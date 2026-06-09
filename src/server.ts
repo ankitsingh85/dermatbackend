@@ -1,6 +1,7 @@
+import dotenv from "dotenv";
+dotenv.config();
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import mongoose from "mongoose";
 import path from "path";
 import http from "http";
@@ -40,11 +41,11 @@ import trainingTypeRoutes from "./routes/trainingTypeRoutes";
 import clinicHiringRequestRoutes from "./routes/clinicHiringRequestRoutes";
 import Chat from "./models/chat";
 import Message from "./models/message";
-
+import reviewRoutes from "./routes/b2breviewRoute";
+import clinicReviewRoutes from "./routes/clinicReviewRoute";
 // ✅ CHAT ROUTES
 import chatRoutes from "./routes/chatRoute";
 import messageRoutes from "./routes/messageRoute";
-dotenv.config();
 
 // ✅ EXPRESS APP (rename internally)
 const app = express();
@@ -59,7 +60,7 @@ app.use(
       return callback(null, false);
     },
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json({ limit: "100mb" }));
@@ -71,7 +72,7 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.get("/", (req, res) => {
   res.send("✅ Backend is running!");
 });
-
+app.use("/api/reviews", reviewRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/admins", adminRoutes);
@@ -103,8 +104,7 @@ app.use("/api/leads", leadRoutes);
 app.use("/api/workshop-trainings", workshopTrainingRoutes);
 app.use("/api/training-types", trainingTypeRoutes);
 app.use("/api/hiring-requests", clinicHiringRequestRoutes);
-
-
+app.use("/api/clinic-reviews", clinicReviewRoutes);
 // ✅ CHAT ROUTES
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
@@ -182,7 +182,11 @@ io.on("connection", (socket) => {
     }
   });
 
-  const emitToUser = (userId: string | undefined, eventName: string, data: any) => {
+  const emitToUser = (
+    userId: string | undefined,
+    eventName: string,
+    data: any,
+  ) => {
     if (!userId) return;
 
     const userSocket = users.get(userId);
@@ -253,7 +257,9 @@ io.on("connection", (socket) => {
   socket.on("call:rejected", (data) => relayCallSignal("call:rejected", data));
   socket.on("call:offer", (data) => relayCallSignal("call:offer", data));
   socket.on("call:answer", (data) => relayCallSignal("call:answer", data));
-  socket.on("call:ice-candidate", (data) => relayCallSignal("call:ice-candidate", data));
+  socket.on("call:ice-candidate", (data) =>
+    relayCallSignal("call:ice-candidate", data),
+  );
   socket.on("call:ended", (data) => relayCallSignal("call:ended", data));
 
   socket.on("disconnect", () => {

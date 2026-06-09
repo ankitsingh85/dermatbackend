@@ -49,6 +49,11 @@ const getUploadedPaths = (files: Express.Multer.File[] | undefined) => {
   return files.map((file) => `/uploads/${file.filename}`);
 };
 
+const getUploadedPath = (files: Express.Multer.File[] | undefined) => {
+  if (!files || files.length === 0) return "";
+  return `/uploads/${files[0].filename}`;
+};
+
 const normalizeNumericFields = (payload: Record<string, unknown>) => {
   const fields = [
     "packSize",
@@ -83,6 +88,11 @@ const normalizeB2BPayload = (body: Record<string, unknown>) => {
   normalizeNumericFields(payload);
   normalizeBooleanFields(payload);
 
+  const promotionalTags = parseJsonArray(payload.promotionalTags);
+  if (promotionalTags) {
+    payload.promotionalTags = promotionalTags;
+  }
+
   return payload;
 };
 
@@ -97,6 +107,7 @@ const friendlyFieldNames: Record<string, string> = {
   moq: "MOQ",
   stockAvailable: "Stock available",
   expiryDate: "Expiry date",
+  shelfLife: "Shelf life",
   description: "Description",
   ingredients: "Ingredients",
   usageInstructions: "Usage instructions",
@@ -119,6 +130,7 @@ const validateB2BPayload = (
     "hsnCode",
     "brandName",
     "expiryDate",
+    "shelfLife",
     "description",
     "ingredients",
     "usageInstructions",
@@ -222,7 +234,10 @@ const validateB2BPayload = (
 /* ================= CREATE ================= */
 router.post(
   "/",
-  upload.fields([{ name: "productImages", maxCount: 10 }]),
+  upload.fields([
+    { name: "productImages", maxCount: 10 },
+    { name: "msds", maxCount: 1 },
+  ]),
   async (req: Request, res: Response) => {
     try {
       const files = req.files as
@@ -230,12 +245,23 @@ router.post(
         | undefined;
       const payload = normalizeB2BPayload(req.body as Record<string, unknown>);
       const uploadedImages = getUploadedPaths(files?.productImages);
+      const uploadedMsds = getUploadedPath(files?.msds);
       const parsedImages = parseJsonArray(payload.productImages);
 
       if (uploadedImages.length > 0) {
         payload.productImages = uploadedImages;
       } else if (parsedImages) {
         payload.productImages = parsedImages;
+      }
+
+      if (uploadedMsds) {
+        const msdsFile = files?.msds?.[0];
+        if (msdsFile?.mimetype !== "application/pdf") {
+          return res.status(400).json({
+            message: "MSDS / Product Datasheet must be a PDF file",
+          });
+        }
+        payload.msds = uploadedMsds;
       }
 
       payload.sku = String(payload.sku || `B2B-${Date.now().toString().slice(-6)}`);
@@ -267,7 +293,10 @@ router.get("/", async (_req, res) => {
 /* ================= UPDATE ================= */
 router.put(
   "/:id",
-  upload.fields([{ name: "productImages", maxCount: 10 }]),
+  upload.fields([
+    { name: "productImages", maxCount: 10 },
+    { name: "msds", maxCount: 1 },
+  ]),
   async (req: Request, res: Response) => {
     try {
       const files = req.files as
@@ -276,12 +305,23 @@ router.put(
       const { _id, createdAt, updatedAt, ...updateData } = req.body;
       const payload = normalizeB2BPayload(updateData as Record<string, unknown>);
       const uploadedImages = getUploadedPaths(files?.productImages);
+      const uploadedMsds = getUploadedPath(files?.msds);
       const parsedImages = parseJsonArray(payload.productImages);
 
       if (uploadedImages.length > 0) {
         payload.productImages = uploadedImages;
       } else if (parsedImages) {
         payload.productImages = parsedImages;
+      }
+
+      if (uploadedMsds) {
+        const msdsFile = files?.msds?.[0];
+        if (msdsFile?.mimetype !== "application/pdf") {
+          return res.status(400).json({
+            message: "MSDS / Product Datasheet must be a PDF file",
+          });
+        }
+        payload.msds = uploadedMsds;
       }
 
       const validationError = validateB2BPayload(payload, false);

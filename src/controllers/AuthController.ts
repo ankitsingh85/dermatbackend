@@ -2,6 +2,12 @@ import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import Admin from "../models/admin";
 import User from "../models/user";
+import {
+  assertVerifiedOtpSession,
+  consumeVerifiedOtpSession,
+  sendTwoFactorOtp,
+  verifyTwoFactorOtp,
+} from "../utils/twoFactorOtp";
 
 /* ================= JWT HELPER ================= */
 const generateToken = (id: string, role: string) => {
@@ -97,6 +103,38 @@ export const adminLogin = async (req: Request, res: Response) => {
   }
 };
 /* ================= USER MOBILE LOGIN ================= */
+export const sendUserLoginOtp = async (req: Request, res: Response) => {
+  try {
+    const { phone, sessionId } = await sendTwoFactorOtp(req.body?.contactNo);
+
+    return res.status(200).json({
+      message: "OTP sent successfully",
+      contactNo: phone,
+      sessionId,
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      message: err.message || "Unable to send OTP",
+    });
+  }
+};
+
+export const verifyUserLoginOtp = async (req: Request, res: Response) => {
+  try {
+    await verifyTwoFactorOtp(req.body?.sessionId, req.body?.otp);
+
+    return res.status(200).json({
+      message: "OTP verified successfully",
+      verified: true,
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      message: err.message || "Invalid OTP",
+      verified: false,
+    });
+  }
+};
+
 export const userMobileLogin = async (req: Request, res: Response) => {
   try {
     const { contactNo, name, email } = req.body as {
@@ -110,6 +148,11 @@ export const userMobileLogin = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Enter a valid 10 digit mobile number" });
     }
 
+    const otpSessionId = req.body?.otpSessionId ?? req.body?.sessionId;
+await assertVerifiedOtpSession(
+ otpSessionId,
+ normalizedContact
+);
     let user = await User.findOne({ contactNo: normalizedContact });
 
     if (user) {
@@ -161,6 +204,10 @@ export const userMobileLogin = async (req: Request, res: Response) => {
       });
     }
 
+await consumeVerifiedOtpSession(
+ otpSessionId,
+ normalizedContact
+);
     const token = generateToken(user._id.toString(), "user");
 
     return res.json({

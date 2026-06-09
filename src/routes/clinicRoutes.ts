@@ -104,6 +104,17 @@ const parseDoctors = (value: unknown) => {
 const normalizeContactNumber = (value: unknown) =>
   String(value ?? "").replace(/\D/g, "").trim();
 
+const parseBoolean = (value: unknown, fallback = false) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    return ["true", "yes", "1", "active"].includes(value.trim().toLowerCase());
+  }
+
+  return fallback;
+};
+
 const normalizeDoctors = (value: unknown) => {
   const parsed = parseDoctors(value);
 
@@ -200,6 +211,8 @@ router.post(
       contactNumber,
       doctors,
       video,
+      verifiedBadge,
+      isActive,
       ...rest
     } = req.body;
 
@@ -250,6 +263,8 @@ router.post(
       photos: uploadedPhotos,
       certifications: uploadedCertifications,
       video: video,
+      verifiedBadge: parseBoolean(verifiedBadge, false),
+      isActive: parseBoolean(isActive, true),
       ...rest,
     });
 
@@ -274,7 +289,7 @@ router.get("/", async (req, res) => {
     if (lightMode) {
       const clinics = await Clinic.find()
         .select(
-          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus doctors clinicLogo bannerImage photos createdAt updatedAt"
+          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus verifiedBadge isActive doctors clinicLogo bannerImage photos createdAt updatedAt"
         )
         .populate("dermaCategory", "name")
         .lean();
@@ -282,7 +297,7 @@ router.get("/", async (req, res) => {
       return res.json(clinics.map(stripHeavyClinicFields));
     }
 
-    const clinics = await Clinic.find().populate("dermaCategory", "name");
+    const clinics = await Clinic.find({ isActive: { $ne: false } }).populate("dermaCategory", "name");
     for (const clinic of clinics) {
       await ensureClinicSlug(clinic);
     }
@@ -401,6 +416,12 @@ router.put(
           ? { addresses: nextAddresses }
           : {}),
         ...(normalizedContactNumber ? { contactNumber: normalizedContactNumber } : {}),
+        ...(hasOwn(req.body, "verifiedBadge")
+          ? { verifiedBadge: parseBoolean(req.body.verifiedBadge, false) }
+          : {}),
+        ...(hasOwn(req.body, "isActive")
+          ? { isActive: parseBoolean(req.body.isActive, true) }
+          : {}),
         slug: nextSlug,
         doctors: parsedDoctors,
         ...(uploadedClinicLogo.length ? { clinicLogo: uploadedClinicLogo[0] } : {}),

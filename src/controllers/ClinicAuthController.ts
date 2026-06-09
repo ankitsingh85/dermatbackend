@@ -8,6 +8,12 @@ import {
   parseClinicAddresses,
 } from "../utils/clinicAddresses";
 import { generateNextClinicCuc } from "../utils/clinicCuc";
+import {
+  assertVerifiedOtpSession,
+  consumeVerifiedOtpSession,
+  sendTwoFactorOtp,
+  verifyTwoFactorOtp,
+} from "../utils/twoFactorOtp";
 
 const generateToken = (id: string, role: string, contactNo?: string) => {
   return jwt.sign(
@@ -46,7 +52,7 @@ const buildUniqueClinicSlug = async (clinicName: string, excludeId?: string) => 
   return slug;
 };
 
-const normalizeContactNumber = (value: unknown) => {
+const normalizeContactNumber = (value: unknown): string => {
   return String(value ?? "").replace(/\D/g, "").trim();
 };
 
@@ -71,6 +77,40 @@ const buildClinicPayload = (clinic: any, contactNo?: string) => {
   };
 };
 
+export const sendClinicLoginOtp = async (req: Request, res: Response) => {
+  try {
+    const { phone, sessionId } = await sendTwoFactorOtp(
+      req.body?.contactNo ?? req.body?.contactNumber
+    );
+
+    return res.status(200).json({
+      message: "OTP sent successfully",
+      contactNo: phone,
+      sessionId,
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      message: err.message || "Unable to send OTP",
+    });
+  }
+};
+
+export const verifyClinicLoginOtp = async (req: Request, res: Response) => {
+  try {
+    await verifyTwoFactorOtp(req.body?.sessionId, req.body?.otp);
+
+    return res.status(200).json({
+      message: "OTP verified successfully",
+      verified: true,
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      message: err.message || "Invalid OTP",
+      verified: false,
+    });
+  }
+};
+
 export const clinicMobileLogin = async (req: Request, res: Response) => {
   try {
     const contactNo = normalizeContactNumber(
@@ -90,7 +130,16 @@ export const clinicMobileLogin = async (req: Request, res: Response) => {
         .json({ message: "Enter a valid 10 digit mobile number" });
     }
 
-    let clinic = await Clinic.findOne({ contactNumber: contactNo });
+   const otpSessionId = req.body?.otpSessionId ?? req.body?.sessionId;
+
+await assertVerifiedOtpSession(
+  otpSessionId,
+  contactNo
+);
+
+let clinic = await Clinic.findOne({
+  contactNumber: contactNo
+});
 
     if (!clinic) {
       if (!clinicName || !email || !address) {
@@ -171,7 +220,16 @@ export const clinicMobileLogin = async (req: Request, res: Response) => {
       return res.status(500).json({ message: "Unable to complete login" });
     }
 
-    const token = generateToken(clinic._id.toString(), "clinic", contactNo);
+   await consumeVerifiedOtpSession(
+  otpSessionId,
+  contactNo
+);
+
+const token = generateToken(
+  clinic._id.toString(),
+  "clinic",
+  contactNo
+);
 
     return res.status(200).json({
       message: "Clinic login successful",

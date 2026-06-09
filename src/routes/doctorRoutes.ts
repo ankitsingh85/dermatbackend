@@ -3,6 +3,12 @@ import jwt from "jsonwebtoken";
 import Doctor from "../models/doctor";
 import { doctorAuth, DoctorAuthRequest } from "../middleware/authDoctor";
 import upload from "../middleware/uploads";
+import {
+  assertVerifiedOtpSession,
+  consumeVerifiedOtpSession,
+  sendTwoFactorOtp,
+  verifyTwoFactorOtp,
+} from "../utils/twoFactorOtp";
 
 const router = express.Router();
 
@@ -148,7 +154,7 @@ const findDoctorByPhone = async (phone: string) => {
 };
 
 /* ================= MOBILE OTP LOGIN ================= */
-router.post("/mobile-login", async (req, res) => {
+router.post("/send-login-otp", async (req, res) => {
   try {
     const phone = normalizePhone(
       req.body?.contactNo ?? req.body?.phone ?? req.body?.mobileNo
@@ -165,8 +171,65 @@ router.post("/mobile-login", async (req, res) => {
     if (!doctor) {
       return res.status(404).json({
         message: "Doctor is not registered",
+        exists: false,
       });
     }
+
+    const { sessionId } = await sendTwoFactorOtp(phone);
+
+    return res.status(200).json({
+      message: "OTP sent successfully",
+      exists: true,
+      contactNo: phone,
+      sessionId,
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      message: err.message || "Unable to send OTP",
+    });
+  }
+});
+
+router.post("/verify-login-otp", async (req, res) => {
+  try {
+    await verifyTwoFactorOtp(req.body?.sessionId, req.body?.otp);
+
+    return res.status(200).json({
+      message: "OTP verified successfully",
+      verified: true,
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      message: err.message || "Invalid OTP",
+      verified: false,
+    });
+  }
+});
+
+router.post("/mobile-login", async (req, res) => {
+  try {
+    const phone = normalizePhone(
+      req.body?.contactNo ?? req.body?.phone ?? req.body?.mobileNo
+    );
+
+    if (phone.length !== 10) {
+      return res.status(400).json({
+        message: "Enter a valid 10 digit mobile number",
+      });
+    }
+
+    const otpSessionId = req.body?.otpSessionId ?? req.body?.sessionId;
+    assertVerifiedOtpSession(otpSessionId, phone);
+
+    const doctor = await findDoctorByPhone(phone);
+
+    if (!doctor) {
+      return res.status(404).json({
+        message: "Doctor is not registered",
+      });
+    }
+
+    consumeVerifiedOtpSession(otpSessionId, phone);
 
     const token = generateToken(doctor._id.toString(), "doctor", phone);
 
@@ -398,23 +461,10 @@ router.post("/check-mobile", async (req, res) => {
     }
 
     // ✅ TOKEN
-    const token = generateToken(
-      doctor._id.toString(),
-      "doctor",
-      phone
-    );
-
     // ✅ RETURN FULL DOCTOR
     return res.status(200).json({
       exists: true,
       message: "Doctor exists",
-      token,
-      role: "doctor",
-
-      doctor: buildDoctorPayload(
-        doctor,
-        phone
-      ),
     });
 
   } catch (err) {

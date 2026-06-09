@@ -19,6 +19,7 @@ export interface IB2BProduct {
   moq: number;
   stockAvailable: number;
   expiryDate: Date;
+  shelfLife: string;
 
   /* ===== DESCRIPTION ===== */
   description: string;
@@ -41,7 +42,7 @@ export interface IB2BProduct {
   msds: string;
   customerReviews: string;
   relatedProducts: string;
-  promotionalTags: string;
+  promotionalTags: string[];
 
   createdAt?: Date;
   updatedAt?: Date;
@@ -106,6 +107,7 @@ const B2BProductSchema = new Schema<B2BProductDocument>(
     moq: { type: Number, required: true, min: 0 },
     stockAvailable: { type: Number, required: true, min: 0 },
     expiryDate: { type: Date, required: true },
+    shelfLife: { type: String, required: true, trim: true },
 
     description: { type: String, required: true, trim: true },
     ingredients: { type: String, required: true, trim: true },
@@ -163,7 +165,7 @@ const B2BProductSchema = new Schema<B2BProductDocument>(
     msds: { type: String, trim: true },
     customerReviews: { type: String, trim: true },
     relatedProducts: { type: String, trim: true },
-    promotionalTags: { type: String, trim: true },
+    promotionalTags: [{ type: String, trim: true }],
   },
   { timestamps: true }
 );
