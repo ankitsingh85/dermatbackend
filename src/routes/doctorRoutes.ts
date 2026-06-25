@@ -32,27 +32,34 @@ const getUploadedPath = (file: Express.Multer.File | undefined) => {
   return `/uploads/${file.filename}`;
 };
 
-const DOCTOR_CODE_PREFIX = "ODUC";
-const DOCTOR_CODE_DIGITS = 4;
-
-const formatDoctorCode = (value: number) =>
-  `${DOCTOR_CODE_PREFIX}${String(value).padStart(DOCTOR_CODE_DIGITS, "0")}`;
+const DOCTOR_CODE_PREFIX = "Dr";
 
 const getNextDoctorCode = async () => {
-  const latestDoctor = await Doctor.findOne({
-    doctorCode: { $regex: `^${DOCTOR_CODE_PREFIX}\\d+$` },
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const yearMonth = `${year}${month}`;
+
+  const lastDoctor = await Doctor.findOne({
+    doctorCode: {
+      $regex: `^${DOCTOR_CODE_PREFIX}-${yearMonth}-\\d+$`,
+    },
   })
-    .sort({ doctorCode: -1 })
+    .sort({ createdAt: -1 })
     .select("doctorCode")
     .lean();
 
-  const latestNumber = Number(
-    String(latestDoctor?.doctorCode || "")
-      .replace(DOCTOR_CODE_PREFIX, "")
-      .replace(/\D/g, "")
-  );
+  let nextSeries = 1;
 
-  return formatDoctorCode(Number.isFinite(latestNumber) ? latestNumber + 1 : 1);
+  if (lastDoctor && lastDoctor.doctorCode) {
+    const lastNumber = Number(lastDoctor.doctorCode.split("-").pop());
+
+    if (!isNaN(lastNumber)) {
+      nextSeries = lastNumber + 1;
+    }
+  }
+
+  return `${DOCTOR_CODE_PREFIX}-${yearMonth}-${nextSeries}`;
 };
 
 const normalizeAddressType = (value: unknown) => {

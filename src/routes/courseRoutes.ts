@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express";
 import upload from "../middleware/uploads";
 import Course from "../models/course";
-import Sequence from "../models/clinicSequence";
+
 
 const router = express.Router();
 
@@ -24,10 +24,14 @@ const stripHtml = (value: unknown) =>
     .replace(/\s+/g, " ")
     .trim();
 
-const numberFields = ["feesInr", "netFeesInr", "maximumSeatsBatchSize"] as const;
+const numberFields = [
+  "feesInr",
+  "netFeesInr",
+  "discountPercent",
+  "maximumSeatsBatchSize",
+] as const;
 const dateFields = ["startDate", "endDate", "registrationDeadline"] as const;
-const courseCodePrefix = "DRMC";
-const courseCodeCounter = "courseUniqueCode";
+
 
 const parseStringArray = (value: unknown): string[] => {
   if (Array.isArray(value)) {
@@ -60,12 +64,15 @@ const parseStringArray = (value: unknown): string[] => {
   return [];
 };
 
-const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] => {
+const getUploadedPaths = (
+  files: Express.Multer.File[] | undefined,
+): string[] => {
   if (!files || files.length === 0) return [];
   return files.map((file) => `/uploads/${file.filename}`);
 };
 
-const trimStringField = (value: unknown) => (typeof value === "string" ? value.trim() : value);
+const trimStringField = (value: unknown) =>
+  typeof value === "string" ? value.trim() : value;
 const parseBoolean = (value: unknown, fallback: boolean) => {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -75,166 +82,199 @@ const parseBoolean = (value: unknown, fallback: boolean) => {
   return fallback;
 };
 
-const getHighestExistingCourseCodeNumber = async () => {
-  const courses = await Course.find({
-    courseUniqueCode: new RegExp(`^${courseCodePrefix}\\d{4,}$`),
-  })
-    .select("courseUniqueCode")
-    .lean();
+const COURSE_CODE_PREFIX = "CourName";
 
-  return courses.reduce((highest, course) => {
-    const codeNumber = Number(course.courseUniqueCode.match(/(\d+)$/)?.[1] || 0);
-    return Number.isFinite(codeNumber) ? Math.max(highest, codeNumber) : highest;
-  }, 0);
-};
+const generateCourseUniqueCode = async () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const yearMonth = `${year}${month}`;
 
-const ensureCourseCodeCounter = async () => {
-  const highestExisting = await getHighestExistingCourseCodeNumber();
-  const sequence = await Sequence.findOneAndUpdate(
-    { name: courseCodeCounter },
-    { $max: { seq: highestExisting }, $setOnInsert: { name: courseCodeCounter } },
-    { new: true, upsert: true }
-  );
+  const lastCourse = await Course.findOne({
+    courseUniqueCode: {
+      $regex: `^${COURSE_CODE_PREFIX}${yearMonth}-`,
+    },
+  }).sort({ createdAt: -1 });
 
-  return sequence.seq;
-};
+  let nextSeries = 1;
 
-const formatCourseCode = (value: number) =>
-  `${courseCodePrefix}${String(value).padStart(4, "0")}`;
+  if (lastCourse && lastCourse.courseUniqueCode) {
+    const lastNumber = Number(
+      lastCourse.courseUniqueCode.split("-").pop()
+    );
 
-const getNextCourseCode = async () => {
-  const currentSequence = await ensureCourseCodeCounter();
-  return formatCourseCode(currentSequence + 1);
-};
-
-const parseCourseCodeNumber = (value: string) => {
-  const match = new RegExp(`^${courseCodePrefix}(\\d{4,})$`).exec(value);
-  if (!match) return null;
-
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const reserveNextCourseCode = async () => {
-  await ensureCourseCodeCounter();
-  const sequence = await Sequence.findOneAndUpdate(
-    { name: courseCodeCounter },
-    { $inc: { seq: 1 } },
-    { new: true }
-  );
-
-  if (!sequence) {
-    throw new Error("Failed to generate course code");
+    if (!isNaN(lastNumber)) {
+      nextSeries = lastNumber + 1;
+    }
   }
 
-  return formatCourseCode(sequence.seq);
+  return `${COURSE_CODE_PREFIX}${yearMonth}-${nextSeries}`;
 };
-
-const markCourseCodeUsed = async (courseUniqueCode: string) => {
-  const codeNumber = parseCourseCodeNumber(courseUniqueCode);
-  if (!codeNumber) return;
-
-  await ensureCourseCodeCounter();
-  await Sequence.updateOne(
-    { name: courseCodeCounter },
-    { $max: { seq: codeNumber } }
-  );
-};
-
 const normalizePayload = (
   body: Record<string, unknown>,
-  files?: { [fieldname: string]: Express.Multer.File[] }
+  files?: { [fieldname: string]: Express.Multer.File[] },
 ) => {
   const payload: Record<string, unknown> = { ...body };
 
+  /* ================= NUMBERS ================= */
+
   for (const field of numberFields) {
     const value = payload[field];
+
     if (value === "" || value === null || value === undefined) {
-      payload[field] = undefined;
+      delete payload[field];
       continue;
     }
 
     const parsed = Number(value);
-    payload[field] = Number.isNaN(parsed) ? undefined : parsed;
+
+    if (!Number.isNaN(parsed)) {
+      payload[field] = parsed;
+    } else {
+      delete payload[field];
+    }
   }
+
+  /* ================= DATES ================= */
 
   for (const field of dateFields) {
     const value = payload[field];
+
     if (!value) {
-      payload[field] = undefined;
+      delete payload[field];
       continue;
     }
 
     const parsedDate = new Date(String(value));
-    payload[field] = Number.isNaN(parsedDate.getTime()) ? "INVALID_DATE" : parsedDate;
+
+    payload[field] = Number.isNaN(parsedDate.getTime())
+      ? "INVALID_DATE"
+      : parsedDate;
   }
 
+  /* ================= BOOLEAN ================= */
+
   if (payload.applyDiscountVoucher !== undefined) {
-    if (typeof payload.applyDiscountVoucher === "string") {
-      payload.applyDiscountVoucher = payload.applyDiscountVoucher === "true";
+    payload.applyDiscountVoucher = parseBoolean(
+      payload.applyDiscountVoucher,
+      false,
+    );
+  }
+
+  /* ================= STRING FIELDS ================= */
+
+  const stringFields = [
+    "courseName",
+    "hsnCode",
+    "instituteName",
+    "courseDuration",
+    "modeOfTraining",
+    "curriculumTopicsCovered",
+    "certificationProvided",
+    "affiliationAccreditation",
+    "discountsOffers",
+    "location",
+    "currentAvailability",
+    "trainerInstructorName",
+    "trainerExperience",
+    "languageOfDelivery",
+    "whatsIncluded",
+    "whatsNotIncluded",
+    "learningOutcomes",
+    "courseDemoVideo",
+    "refundCancellationPolicy",
+    "postCourseSupport",
+    "mobileNo",
+    "contactForQueries",
+  ];
+
+  stringFields.forEach((field) => {
+    if (payload[field] !== undefined) {
+      payload[field] = trimStringField(payload[field]);
+    }
+  });
+
+  /* ================= COURSE TYPE FIX ================= */
+  if (payload.courseType !== undefined) {
+    const types = parseStringArray(payload.courseType);
+
+    if (types.length > 0) {
+      payload.courseType = types;
     } else {
-      payload.applyDiscountVoucher = Boolean(payload.applyDiscountVoucher);
+      delete payload.courseType;
     }
   }
 
-  payload.courseName = trimStringField(payload.courseName);
-  payload.courseUniqueCode = trimStringField(payload.courseUniqueCode);
-  payload.courseType = trimStringField(payload.courseType);
-  payload.instituteName = trimStringField(payload.instituteName);
-  payload.courseDuration = trimStringField(payload.courseDuration);
-  payload.modeOfTraining = trimStringField(payload.modeOfTraining);
-  payload.curriculumTopicsCovered = trimStringField(payload.curriculumTopicsCovered);
-  payload.certificationProvided = trimStringField(payload.certificationProvided);
-  payload.affiliationAccreditation = trimStringField(payload.affiliationAccreditation);
-  payload.discountsOffers = trimStringField(payload.discountsOffers);
-  payload.location = trimStringField(payload.location);
-  payload.currentAvailability = trimStringField(payload.currentAvailability);
-  payload.trainerInstructorName = trimStringField(payload.trainerInstructorName);
-  payload.trainerImage = trimStringField(payload.trainerImage);
-  payload.trainerExperience = trimStringField(payload.trainerExperience);
-  payload.languageOfDelivery = trimStringField(payload.languageOfDelivery);
-  payload.whatsIncluded = trimStringField(payload.whatsIncluded);
-  payload.whatsNotIncluded = trimStringField(payload.whatsNotIncluded);
-  payload.learningOutcomes = trimStringField(payload.learningOutcomes);
-  payload.courseImage = trimStringField(payload.courseImage);
-  payload.courseDemoVideo = trimStringField(payload.courseDemoVideo);
-  payload.refundCancellationPolicy = trimStringField(payload.refundCancellationPolicy);
-  payload.postCourseSupport = trimStringField(payload.postCourseSupport);
-  payload.mobileNo = trimStringField(payload.mobileNo);
-  payload.contactForQueries = trimStringField(payload.contactForQueries);
-  payload.applyDiscountVoucher = parseBoolean(payload.applyDiscountVoucher, false);
+  /* ================= TARGET AUDIENCE FIX ================= */
+  if (payload.targetAudience !== undefined) {
+    const audience = parseStringArray(payload.targetAudience);
 
-  payload.targetAudience = parseStringArray(payload.targetAudience);
+    if (audience.length > 0) {
+      payload.targetAudience = audience;
+    } else {
+      delete payload.targetAudience;
+    }
+  }
+
+  /* ================= COURSE IMAGE FIX ================= */
 
   const uploadedCourseImage = getUploadedPaths(files?.courseImage);
-  payload.courseImage =
-    uploadedCourseImage.length > 0
-      ? uploadedCourseImage[0]
-      : trimStringField(payload.courseImage);
+
+  if (uploadedCourseImage.length > 0) {
+    payload.courseImage = uploadedCourseImage[0];
+  } else if (payload.courseImage !== undefined) {
+    const oldImage = trimStringField(payload.courseImage);
+
+    if (oldImage) {
+      payload.courseImage = oldImage;
+    } else {
+      delete payload.courseImage;
+    }
+  }
+
+  /* ================= TRAINER IMAGE FIX ================= */
 
   const uploadedTrainerImage = getUploadedPaths(files?.trainerImage);
-  payload.trainerImage =
-    uploadedTrainerImage.length > 0
-      ? uploadedTrainerImage[0]
-      : trimStringField(payload.trainerImage);
+
+  if (uploadedTrainerImage.length > 0) {
+    payload.trainerImage = uploadedTrainerImage[0];
+  } else if (payload.trainerImage !== undefined) {
+    const oldImage = trimStringField(payload.trainerImage);
+
+    if (oldImage) {
+      payload.trainerImage = oldImage;
+    } else {
+      delete payload.trainerImage;
+    }
+  }
+
+  /* ================= BROCHURE PDF FIX ================= */
 
   const uploadedBrochures = getUploadedPaths(files?.brochurePdfDownload);
-  payload.brochurePdfDownload =
-    uploadedBrochures.length > 0
-      ? uploadedBrochures
-      : parseStringArray(payload.brochurePdfDownload);
+
+  if (uploadedBrochures.length > 0) {
+    payload.brochurePdfDownload = uploadedBrochures;
+  } else if (payload.brochurePdfDownload !== undefined) {
+    const brochures = parseStringArray(payload.brochurePdfDownload);
+
+    if (brochures.length > 0) {
+      payload.brochurePdfDownload = brochures;
+    } else {
+      delete payload.brochurePdfDownload;
+    }
+  }
 
   return payload;
 };
 
 const validateCoursePayload = (
   payload: Record<string, unknown>,
-  isCreate = false
+  isCreate = false,
 ) => {
   const requiredTextFields = [
     "courseName",
-    "courseUniqueCode",
     "courseType",
+    "hsnCode",
     "instituteName",
     "courseDuration",
     "modeOfTraining",
@@ -259,14 +299,28 @@ const validateCoursePayload = (
   ] as const;
 
   for (const field of requiredTextFields) {
+    if (field === "courseType") {
+      if (
+        isCreate &&
+        (!Array.isArray(payload.courseType) || payload.courseType.length === 0)
+      ) {
+        return { message: "Please select at least one course type" };
+      }
+      continue;
+    }
+
     if (isCreate && !stripHtml(payload[field])) {
-      return { message: `${String(field).replace(/([A-Z])/g, " $1")} is required` };
+      return {
+        message: `${String(field).replace(/([A-Z])/g, " $1")} is required`,
+      };
     }
   }
 
   for (const field of dateFields) {
     if (payload[field] === "INVALID_DATE") {
-      return { message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid date` };
+      return {
+        message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid date`,
+      };
     }
   }
 
@@ -282,22 +336,28 @@ const validateCoursePayload = (
     !textOnlyRegex.test(stripHtml(payload.trainerInstructorName))
   ) {
     return {
-      message: "Trainer / instructor name should contain only letters and spaces",
+      message:
+        "Trainer / instructor name should contain only letters and spaces",
     };
   }
 
   const requiredNumberFields = [
     "feesInr",
     "netFeesInr",
+    "discountPercent",
     "maximumSeatsBatchSize",
   ] as const;
 
   for (const field of requiredNumberFields) {
     if (
       isCreate &&
-      (payload[field] === undefined || payload[field] === null || payload[field] === "")
+      (payload[field] === undefined ||
+        payload[field] === null ||
+        payload[field] === "")
     ) {
-      return { message: `${String(field).replace(/([A-Z])/g, " $1")} is required` };
+      return {
+        message: `${String(field).replace(/([A-Z])/g, " $1")} is required`,
+      };
     }
 
     if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
@@ -314,9 +374,20 @@ const validateCoursePayload = (
         message: `${String(field).replace(/([A-Z])/g, " $1")} must contain digits only`,
       };
     }
+
+    if (
+      field === "discountPercent" &&
+      payload[field] !== undefined &&
+      (Number(payload[field]) < 0 || Number(payload[field]) > 100)
+    ) {
+      return { message: "Discount % must be between 0 and 100" };
+    }
   }
 
-  if (payload.mobileNo !== undefined && !digitsOnlyRegex.test(String(payload.mobileNo))) {
+  if (
+    payload.mobileNo !== undefined &&
+    !digitsOnlyRegex.test(String(payload.mobileNo))
+  ) {
     return { message: "Mobile number must contain digits only" };
   }
 
@@ -328,13 +399,18 @@ const validateCoursePayload = (
     return { message: "Mobile number must be exactly 10 digits" };
   }
 
-  if (payload.courseDemoVideo !== undefined && !isValidYoutubeUrl(payload.courseDemoVideo)) {
+  if (
+    payload.courseDemoVideo !== undefined &&
+    !isValidYoutubeUrl(payload.courseDemoVideo)
+  ) {
     return { message: "Course demo video must be a valid YouTube link" };
   }
 
   if (
     isCreate &&
-    (!payload.courseImage || typeof payload.courseImage !== "string" || !String(payload.courseImage).trim())
+    (!payload.courseImage ||
+      typeof payload.courseImage !== "string" ||
+      !String(payload.courseImage).trim())
   ) {
     return { message: "Course image is required" };
   }
@@ -364,21 +440,57 @@ const validateCoursePayload = (
     return { message: "Target audience must be a valid list" };
   }
 
-  if (isCreate && Array.isArray(payload.targetAudience) && payload.targetAudience.length === 0) {
+  if (
+    isCreate &&
+    Array.isArray(payload.targetAudience) &&
+    payload.targetAudience.length === 0
+  ) {
     return { message: "At least one target audience item is required" };
   }
 
   return null;
 };
 
-router.get("/next-code", async (_req: Request, res: Response) => {
-  try {
-    const courseUniqueCode = await getNextCourseCode();
-    return res.json({ courseUniqueCode });
-  } catch (err: any) {
-    return res.status(500).json({ message: err.message || "Failed to generate course code" });
+router.get(
+  "/next-code",
+  async (req: Request, res: Response) => {
+
+    try {
+
+      const courseName =
+        String(
+          req.query.courseName || ""
+        ).trim();
+
+
+      if (!courseName) {
+
+        return res.status(400).json({
+          message:
+          "Course name is required",
+        });
+
+      }
+
+
+  const courseUniqueCode = await generateCourseUniqueCode();
+      return res.json({
+        courseUniqueCode,
+      });
+
+
+    } catch (err:any) {
+
+      return res.status(500).json({
+        message:
+        err.message ||
+        "Failed to generate course code",
+      });
+
+    }
+
   }
-});
+);
 
 router.post(
   "/",
@@ -389,7 +501,9 @@ router.post(
   ]),
   async (req: Request, res: Response) => {
     try {
-      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+      const files = req.files as
+        | { [fieldname: string]: Express.Multer.File[] }
+        | undefined;
       const payload = normalizePayload(req.body, files);
       const validationError = validateCoursePayload(payload, true);
       if (validationError) {
@@ -400,33 +514,9 @@ router.post(
         return res.status(400).json({ message: "Course name is required" });
       }
 
-      const requestedCode = String(payload.courseUniqueCode || "").trim();
+    payload.courseUniqueCode = await generateCourseUniqueCode();
 
-      if (requestedCode) {
-        const requestedCodeNumber = parseCourseCodeNumber(requestedCode);
-        if (!requestedCodeNumber) {
-          return res.status(400).json({ message: "Invalid course unique code" });
-        }
 
-        const highestUsedCodeNumber = await ensureCourseCodeCounter();
-        if (requestedCodeNumber <= highestUsedCodeNumber) {
-          return res.status(409).json({
-            message: "Course unique code was already used. Please refresh and try again.",
-          });
-        }
-
-        payload.courseUniqueCode = requestedCode;
-      } else {
-        payload.courseUniqueCode = await reserveNextCourseCode();
-      }
-
-      const existingCourse = await Course.findOne({
-        courseUniqueCode: String(payload.courseUniqueCode).trim(),
-      });
-
-      if (existingCourse) {
-        return res.status(409).json({ message: "Course unique code already exists" });
-      }
 
       const course = new Course({
         ...payload,
@@ -435,13 +525,14 @@ router.post(
       });
 
       await course.save();
-      await markCourseCodeUsed(course.courseUniqueCode);
       return res.status(201).json(course);
     } catch (err: any) {
       console.error("Create course error:", err);
-      return res.status(500).json({ message: err.message || "Failed to create course" });
+      return res
+        .status(500)
+        .json({ message: err.message || "Failed to create course" });
     }
-  }
+  },
 );
 
 router.get("/", async (_req: Request, res: Response) => {
@@ -449,7 +540,9 @@ router.get("/", async (_req: Request, res: Response) => {
     const courses = await Course.find().sort({ createdAt: -1 });
     return res.json(courses);
   } catch (err: any) {
-    return res.status(500).json({ message: err.message || "Failed to fetch courses" });
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to fetch courses" });
   }
 });
 
@@ -463,7 +556,9 @@ router.get("/:id", async (req: Request, res: Response) => {
 
     return res.json(course);
   } catch (err: any) {
-    return res.status(500).json({ message: err.message || "Failed to fetch course" });
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to fetch course" });
   }
 });
 
@@ -476,7 +571,9 @@ router.put(
   ]),
   async (req: Request, res: Response) => {
     try {
-      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+      const files = req.files as
+        | { [fieldname: string]: Express.Multer.File[] }
+        | undefined;
       const payload = normalizePayload(req.body, files);
       const validationError = validateCoursePayload(payload, false);
       if (validationError) {
@@ -490,14 +587,16 @@ router.put(
         });
 
         if (duplicateCourse) {
-          return res.status(409).json({ message: "Course unique code already exists" });
+          return res
+            .status(409)
+            .json({ message: "Course unique code already exists" });
         }
       }
 
       const updatedCourse = await Course.findByIdAndUpdate(
         req.params.id,
         payload,
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       );
 
       if (!updatedCourse) {
@@ -506,9 +605,11 @@ router.put(
 
       return res.json(updatedCourse);
     } catch (err: any) {
-      return res.status(500).json({ message: err.message || "Failed to update course" });
+      return res
+        .status(500)
+        .json({ message: err.message || "Failed to update course" });
     }
-  }
+  },
 );
 
 router.delete("/:id", async (req: Request, res: Response) => {
@@ -521,7 +622,9 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     return res.json({ message: "Course deleted successfully" });
   } catch (err: any) {
-    return res.status(500).json({ message: err.message || "Failed to delete course" });
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to delete course" });
   }
 });
 

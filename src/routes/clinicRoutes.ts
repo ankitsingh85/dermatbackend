@@ -10,10 +10,80 @@ import {
   parseClinicAddresses,
   type ClinicAddress,
 } from "../utils/clinicAddresses";
-import { generateNextClinicCuc } from "../utils/clinicCuc";
-
 const router = express.Router();
+/* ================= LOCATION HELPERS ================= */
 
+
+const extractLatLngFromMapLink = (url?: any) => {
+
+  if (!url) return null;
+
+
+  const match =
+    String(url).match(
+      /@(-?\d+\.\d+),(-?\d+\.\d+)/
+    );
+
+
+  if (!match) return null;
+
+
+  return {
+    latitude: Number(match[1]),
+    longitude: Number(match[2]),
+  };
+
+};
+
+
+
+const calculateDistanceKm = (
+  lat1:number,
+  lon1:number,
+  lat2:number,
+  lon2:number
+)=>{
+
+
+const R = 6371;
+
+
+const dLat =
+(lat2-lat1) * Math.PI / 180;
+
+
+const dLon =
+(lon2-lon1) * Math.PI / 180;
+
+
+
+const a =
+Math.sin(dLat/2)
+*
+Math.sin(dLat/2)
++
+Math.cos(lat1*Math.PI/180)
+*
+Math.cos(lat2*Math.PI/180)
+*
+Math.sin(dLon/2)
+*
+Math.sin(dLon/2);
+
+
+
+return (
+R *
+2 *
+Math.atan2(
+Math.sqrt(a),
+Math.sqrt(1-a)
+)
+
+);
+
+
+};
 const slugifyClinicName = (value: string) => {
   const slug = value
     .trim()
@@ -132,6 +202,61 @@ const normalizeDoctors = (value: unknown) => {
     );
 };
 
+/* ================= WORKING HOURS HELPER =================
+   Expected shape (sent as a JSON string from the frontend):
+   {
+     openTime: "09:00",
+     closeTime: "18:00",
+     days: ["Monday", "Tuesday", ...],   // days clinic is open
+     offDays: ["Sunday"]                 // days clinic is closed
+   }
+*/
+interface ClinicWorkingHoursInput {
+  openTime: string;
+  closeTime: string;
+  days: string[];
+  offDays: string[];
+}
+
+const VALID_WEEK_DAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+const parseWorkingHours = (value: unknown): ClinicWorkingHoursInput => {
+  let parsed: any = value;
+
+  if (typeof value === "string") {
+    try {
+      parsed = value.trim() ? JSON.parse(value) : {};
+    } catch {
+      parsed = {};
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object") parsed = {};
+
+  const sanitizeDayList = (list: unknown): string[] => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => VALID_WEEK_DAYS.includes(item));
+  };
+
+  return {
+    openTime: typeof parsed.openTime === "string" ? parsed.openTime.trim() : "",
+    closeTime: typeof parsed.closeTime === "string" ? parsed.closeTime.trim() : "",
+    days: sanitizeDayList(parsed.days),
+    offDays: sanitizeDayList(parsed.offDays),
+  };
+};
+
 const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] => {
   if (!files || files.length === 0) return [];
   return files.map((file) => `/uploads/${file.filename}`);
@@ -139,6 +264,45 @@ const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] =>
 
 const hasOwn = (obj: Record<string, unknown> | undefined, key: string) =>
   Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
+
+/* ================= CUC GENERATOR =================
+   Format: ClinicName-<YYYYMM>-<N>
+   e.g. "ClinicName-202606-1", "ClinicName-202606-2", "ClinicName-202606-3" ...
+   "ClinicName" is a fixed prefix (NOT based on the actual clinic's name).
+   The sequence number increments dynamically per month, across all clinics.
+*/
+const CUC_PREFIX_LABEL = "ClicName";
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const generateNextClinicCuc = async () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  const prefix = `${CUC_PREFIX_LABEL}-${year}${month}-`;
+  const escapedPrefix = escapeRegExp(prefix);
+
+  const existing = await Clinic.find({
+    cuc: { $regex: `^${escapedPrefix}\\d+$` },
+  }).select("cuc");
+
+  let maxSeq = 0;
+  const seqRegex = new RegExp(`^${escapedPrefix}(\\d+)$`);
+
+  for (const clinic of existing) {
+    const match = clinic.cuc?.match(seqRegex);
+    if (match) {
+      const seq = parseInt(match[1], 10);
+      if (!Number.isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+
+  return `${prefix}${maxSeq + 1}`;
+};
 
 const buildClinicAddressesFromRequest = (
   body: Record<string, unknown> | undefined,
@@ -210,6 +374,7 @@ router.post(
       contactNo,
       contactNumber,
       doctors,
+      workingHours,
       video,
       verifiedBadge,
       isActive,
@@ -226,10 +391,16 @@ router.post(
     }
 
     const parsedDoctors = normalizeDoctors(doctors);
+    const parsedWorkingHours = parseWorkingHours(workingHours);
     const normalizedContactNumber =
       normalizeContactNumber(contactNumber) ||
       normalizeContactNumber(contactNo);
+
+    // CUC now uses a fixed "ClinicName" prefix + current year/month + a
+    // global sequence number that increments per month, e.g.
+    // "ClinicName-202606-1", "ClinicName-202606-2", "ClinicName-202606-3" ...
     const nextCuc = await generateNextClinicCuc();
+
     const clinicAddresses = buildClinicAddressesFromRequest(
       req.body,
       String(address).trim(),
@@ -245,7 +416,7 @@ router.post(
     const uploadedSpecialOffers = getUploadedPaths(files?.specialOffers);
     const uploadedPhotos = getUploadedPaths(files?.photos);
     const uploadedCertifications = getUploadedPaths(files?.certifications);
-
+const location = extractLatLngFromMapLink(rest.mapLink);
     const clinic = await Clinic.create({
       cuc: nextCuc,
       clinicName: String(clinicName).trim(),
@@ -253,9 +424,25 @@ router.post(
       dermaCategory,
       address: nextAddressText,
       addresses: clinicAddresses,
-      email: String(email).trim(),
-      ...(normalizedContactNumber ? { contactNumber: normalizedContactNumber } : {}),
+   email: String(email).trim(),
+
+
+// ADD THESE TWO
+
+latitude:
+location?.latitude || null,
+
+
+longitude:
+location?.longitude || null,
+
+
+
+...(normalizedContactNumber 
+? { contactNumber: normalizedContactNumber } 
+: {}),
       doctors: parsedDoctors,
+      workingHours: parsedWorkingHours,
       clinicLogo: uploadedClinicLogo[0] || undefined,
       bannerImage: uploadedBannerImage[0] || undefined,
       rateCard: uploadedRateCard,
@@ -272,24 +459,150 @@ router.post(
       message: "Clinic created successfully",
       clinic,
     });
-  } catch (err: any) {
+   } catch (err: any) {
+
     console.error("Create clinic error:", err);
+
+    if (err?.code === 11000) {
+      const field = Object.keys(err.keyValue || {})[0] || "field";
+      const value = err.keyValue?.[field];
+      return res.status(400).json({
+        message: `A clinic with this ${field} already exists (${value}).`,
+        error: err.message,
+      });
+    }
+
     res.status(500).json({
       message: "Failed to create clinic",
       error: err.message,
     });
+
   }
-  }
+
+ }
 );
 
 /* ================= GET ALL CLINICS ================= */
+
+/* ================= NEARBY CLINICS ================= */
+
+
+router.get(
+"/nearby",
+async(
+req:Request,
+res:Response
+)=>{
+
+
+try{
+
+
+const {
+lat,
+lng
+}=req.query;
+
+
+
+if(!lat || !lng){
+
+return res.status(400).json({
+
+message:"Location required"
+
+});
+
+}
+
+
+
+const clinics =
+await Clinic.find({
+
+isActive:{
+$ne:false
+},
+
+
+latitude:{
+$ne:null
+},
+
+
+longitude:{
+$ne:null
+}
+
+
+})
+.populate(
+"dermaCategory",
+"name"
+);
+
+
+
+
+const nearby =
+clinics.filter(
+(clinic:any)=>{
+
+
+const distance =
+calculateDistanceKm(
+
+Number(lat),
+
+Number(lng),
+
+clinic.latitude,
+
+clinic.longitude
+
+);
+
+
+
+return distance <= 15;
+
+
+});
+
+
+
+return res.json(
+nearby
+);
+
+
+
+}
+catch(error:any){
+
+
+return res.status(500).json({
+
+message:
+"Nearby clinic failed",
+
+error:error.message
+
+});
+
+
+}
+
+
+});
+
 router.get("/", async (req, res) => {
   try {
     const lightMode = String(req.query.light || "").toLowerCase() === "true";
     if (lightMode) {
       const clinics = await Clinic.find()
         .select(
-          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus verifiedBadge isActive doctors clinicLogo bannerImage photos createdAt updatedAt"
+          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus verifiedBadge isActive doctors clinicLogo bannerImage photos workingHours createdAt updatedAt"
         )
         .populate("dermaCategory", "name")
         .lean();
@@ -406,7 +719,20 @@ router.put(
         formatClinicAddressText(nextAddresses[0]) ||
         ""
       : String(req.body?.address || "").trim() || existingClinic.address || "";
+const updateLocation =
+extractLatLngFromMapLink(req.body.mapLink);
 
+
+if(updateLocation){
+
+ existingClinic.latitude =
+ updateLocation.latitude;
+
+
+ existingClinic.longitude =
+ updateLocation.longitude;
+
+}
     const updated = await Clinic.findByIdAndUpdate(
       req.params.id,
       {
@@ -416,6 +742,9 @@ router.put(
           ? { addresses: nextAddresses }
           : {}),
         ...(normalizedContactNumber ? { contactNumber: normalizedContactNumber } : {}),
+        ...(hasOwn(req.body, "workingHours")
+          ? { workingHours: parseWorkingHours(req.body.workingHours) }
+          : {}),
         ...(hasOwn(req.body, "verifiedBadge")
           ? { verifiedBadge: parseBoolean(req.body.verifiedBadge, false) }
           : {}),

@@ -7,7 +7,7 @@ export interface IB2BProduct {
   /* ===== BASIC INFO ===== */
   sku: string;
   productName: string;
-  category: string;
+  category: string[];
   subCategory: string;
   hsnCode: string;
   brandName: string;
@@ -33,7 +33,7 @@ export interface IB2BProduct {
   licenseNumber: string;
   mrp: number;
   discountedPrice: number;
-  gst: 5 | 12 | 18 | 28;
+  gst: number;
   taxIncluded: boolean;
 
   /* ===== MEDIA ===== */
@@ -64,7 +64,16 @@ const B2BProductSchema = new Schema<B2BProductDocument>(
         message: "Product name should contain only letters and spaces",
       },
     },
-    category: { type: String, required: true, trim: true },
+    // Multi-select category support: a product can now belong to
+    // multiple categories at once.
+    category: {
+      type: [String],
+      required: true,
+      validate: {
+        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
+        message: "At least one category is required",
+      },
+    },
     subCategory: { type: String, trim: true },
     hsnCode: {
       type: String,
@@ -85,15 +94,10 @@ const B2BProductSchema = new Schema<B2BProductDocument>(
       },
     },
 
-    packSize: {
-      type: String,
-      required: true,
-      trim: true,
-      validate: {
-        validator: (value: string) => /^\d+$/.test(value),
-        message: "Pack size must contain digits only",
-      },
-    },
+    // Pack size / quantity now accepts numbers, symbols, and text
+    // (e.g. "10x5 ml", "Box of 24", "500g") instead of digits only.
+    packSize: { type: String, required: true, trim: true },
+
     pricePerUnit: { type: Number, required: true, min: 0 },
     bulkPriceTier: {
       type: String,
@@ -135,7 +139,11 @@ const B2BProductSchema = new Schema<B2BProductDocument>(
     },
     mrp: { type: Number, required: true, min: 0 },
     discountedPrice: { type: Number, required: true, min: 0 },
-    gst: { type: Number, enum: [5, 12, 18, 28], default: 5 },
+
+    // GST is now a free-form percentage (0-100). The frontend still offers
+    // common presets via a dropdown, plus a "Custom" option that reveals a
+    // text field for any other percentage.
+    gst: { type: Number, required: true, min: 0, max: 100, default: 5 },
     taxIncluded: { type: Boolean, default: true },
 
     productImages: {

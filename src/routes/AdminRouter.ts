@@ -15,13 +15,47 @@ router.post("/", createAdmin);
 
 /* ================= LIST ADMINS ================= */
 
+/* ================= LIST ADMINS ================= */
+
 router.get("/", async (_req, res) => {
   try {
-    const admins = await Admin.find().select("-password");
+    const admins = await Admin.find()
+      .select(
+        "empId name email phone role lastModifiedAt lastModifiedField createdAt updatedAt",
+      )
+      .sort({
+        createdAt: -1,
+      });
 
-    res.status(200).json(admins);
-  } catch {
+    res.status(200).json({
+      success: true,
+
+      admins: admins.map((admin) => ({
+        _id: admin._id,
+
+        // SAME NAME AS FRONTEND
+        empId: admin.empId,
+
+        name: admin.name,
+
+        email: admin.email,
+
+        phone: admin.phone,
+
+        role: admin.role,
+
+        // SAME NAME AS FRONTEND
+        lastModifiedField: admin.lastModifiedField || "No modification",
+
+        // SAME NAME AS FRONTEND
+        lastModifiedAt: admin.lastModifiedAt || admin.createdAt,
+
+        createdAt: admin.createdAt,
+      })),
+    });
+  } catch (error) {
     res.status(500).json({
+      success: false,
       message: "Error fetching admins",
     });
   }
@@ -74,68 +108,60 @@ router.post("/forgot-password", async (req, res) => {
 });
 
 /* ================= UPDATE ADMIN ================= */
+/* ================= UPDATE ADMIN ================= */
 
 router.put("/:id", async (req, res) => {
-  const { name, email, phone, role } = req.body;
-
   try {
-    const updateData: Record<string, unknown> = {};
+    const admin = await Admin.findById(req.params.id).select("+password");
 
-    if (name) {
-      const cleanName = name.trim();
-
-      if (!nameRegex.test(cleanName)) {
-        return res.status(400).json({
-          message: "Name should contain letters only",
-        });
-      }
-
-      updateData.name = cleanName;
-    }
-
-    if (email) {
-      updateData.email = email.trim().toLowerCase();
-    }
-
-    if (phone) {
-      if (!phoneRegex.test(phone)) {
-        return res.status(400).json({
-          message: "Phone must contain 10 digits",
-        });
-      }
-
-      updateData.phone = phone;
-    }
-
-    if (role) {
-      updateData.role = role;
-    }
-
-    const updatedAdmin = await Admin.findByIdAndUpdate(
-      req.params.id,
-
-      updateData,
-
-      {
-        new: true,
-        runValidators: true,
-      },
-    ).select("-password");
-
-    if (!updatedAdmin) {
+    if (!admin) {
       return res.status(404).json({
         message: "Admin not found",
       });
     }
 
+    const { name, email, phone, role, password } = req.body;
+
+    if (name) {
+      admin.name = name.trim();
+
+      admin.lastModifiedField = "Name Changed";
+    }
+
+    if (email) {
+      admin.email = email.trim().toLowerCase();
+    }
+
+    if (phone) {
+      admin.phone = phone;
+    }
+
+    if (role) {
+      admin.role = role;
+
+      admin.lastModifiedField = "Access Level Changed";
+    }
+
+    if (password) {
+      admin.password = password;
+
+      admin.lastModifiedField = "Password Changed";
+    }
+
+    admin.lastModifiedAt = new Date();
+
+    await admin.save();
+
     res.json({
       message: "Admin updated successfully",
 
-      admin: updatedAdmin,
+      admin,
     });
   } catch (error) {
+    console.log(error);
+
     res.status(500).json({
-      message: "Server error while updating admin",
+      message: "Update failed",
     });
   }
 });

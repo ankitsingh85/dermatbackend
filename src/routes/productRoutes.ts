@@ -4,16 +4,38 @@ import Product from "../models/Products";
 
 const router = express.Router();
 
+
 const textOnlyRegex = /^[A-Za-z ]+$/;
+
+
+/* ================= URL VALIDATION ================= */
+
 const isValidUrl = (value: unknown) => {
-  if (typeof value !== "string" || !value.trim()) return false;
+
+  if (!value) return true;
+
+  if (typeof value !== "string") return false;
+
+
   try {
+
     const parsed = new URL(value.trim());
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
+
+    return (
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:"
+    );
+
   } catch {
+
     return false;
+
   }
+
 };
+
+
+/* ================= CLEAN TEXT ================= */
 
 const stripHtml = (value: unknown) =>
   String(value ?? "")
@@ -21,261 +43,922 @@ const stripHtml = (value: unknown) =>
     .replace(/\s+/g, " ")
     .trim();
 
-const parseJsonArray = (value: unknown): string[] | undefined => {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item)).filter(Boolean);
-  }
 
-  if (typeof value !== "string" || !value.trim()) return undefined;
 
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) {
-      return parsed.map((item) => String(item)).filter(Boolean);
-    }
-  } catch {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
+/* ================= ARRAY PARSER ================= */
 
-  return undefined;
+const parseJsonArray = (
+value:unknown
+):string[]|undefined=>{
+
+
+if(Array.isArray(value)){
+
+return value.map(String);
+
+}
+
+
+if(
+typeof value !== "string" ||
+!value.trim()
+){
+
+return undefined;
+
+}
+
+
+
+try{
+
+
+const parsed =
+JSON.parse(value);
+
+
+if(Array.isArray(parsed)){
+
+return parsed.map(String);
+
+}
+
+
+}
+
+catch{
+
+
+return value
+.split(",")
+.map(v=>v.trim())
+.filter(Boolean);
+
+
+}
+
+
+return undefined;
+
 };
 
-const getUploadedPaths = (files: Express.Multer.File[] | undefined) => {
-  if (!files || files.length === 0) return [];
-  return files.map((file) => `/uploads/${file.filename}`);
+
+
+
+
+/* ================= FILE PATH ================= */
+
+
+const getUploadedPaths =
+(files?:Express.Multer.File[])=>{
+
+
+if(!files || !files.length)
+return [];
+
+
+return files.map(
+file=>`/uploads/${file.filename}`
+);
+
+
 };
 
-const normalizeNumericFields = (payload: Record<string, unknown>) => {
-  if (payload.mrpPrice !== undefined) payload.mrpPrice = Number(payload.mrpPrice);
-  if (payload.discountedPrice !== undefined) {
-    payload.discountedPrice = Number(payload.discountedPrice);
-  }
-  if (payload.discountPercent !== undefined) {
-    payload.discountPercent = Number(payload.discountPercent);
-  }
-  if (payload.taxPercent !== undefined) payload.taxPercent = Number(payload.taxPercent);
+
+
+
+
+/* ================= NUMBERS ================= */
+
+
+const normalizeNumericFields =
+(payload:Record<string,unknown>)=>{
+
+
+[
+"mrpPrice",
+"discountedPrice",
+"discountPercent",
+"taxPercent"
+
+].forEach(field=>{
+
+
+if(payload[field] !== undefined){
+
+payload[field] =
+Number(payload[field]);
+
+}
+
+
+});
+
+
 };
+
+
+
+
+
+
+/* ================= NORMALIZE PAYLOAD ================= */
+
 
 const normalizeProductPayload = (
-  req: Request,
-  files?: { [fieldname: string]: Express.Multer.File[] }
-) => {
-  const payload: Record<string, unknown> = { ...req.body };
-  normalizeNumericFields(payload);
 
-  const uploadedProductImages = getUploadedPaths(files?.productImages);
-  const parsedProductImages = parseJsonArray(payload.productImages);
+req:Request,
 
-  if (uploadedProductImages.length > 0) {
-    payload.productImages = uploadedProductImages;
-  } else if (parsedProductImages) {
-    payload.productImages = parsedProductImages;
-  }
+files?:{
+[fieldname:string]:
+Express.Multer.File[]
+}
 
-  return payload;
+)=>{
+
+
+const payload:
+Record<string,unknown> =
+{
+...req.body
 };
 
-const friendlyFieldNames: Record<string, string> = {
-  productName: "Product name",
-  category: "Category",
-  brandName: "Brand name",
-  description: "Description",
-  ingredients: "Ingredients",
-  targetConcerns: "Target concerns",
-  usageInstructions: "Usage instructions",
-  expiryDate: "Expiry date",
-  manufacturerName: "Manufacturer name",
-  licenseNumber: "License number",
-  packagingType: "Packaging type",
-  skinHairType: "Skin / hair type",
-  barcode: "Barcode",
-  netQuantity: "Net quantity",
-  mrpPrice: "MRP price",
-  discountedPrice: "Discounted price",
-  discountPercent: "Discount percent",
-  taxPercent: "Tax percent",
-  productShortVideo: "Product short video",
-  productImages: "Product images",
+
+
+
+
+/* CATEGORY ARRAY */
+
+
+const categories =
+parseJsonArray(
+payload.category
+);
+
+
+if(categories){
+
+payload.category =
+categories;
+
+}
+
+
+
+
+/* IMAGE */
+
+
+const uploadedImages =
+getUploadedPaths(
+files?.productImages
+);
+
+
+const bodyImages =
+parseJsonArray(
+payload.productImages
+);
+
+
+
+if(uploadedImages.length){
+
+payload.productImages =
+uploadedImages;
+
+}
+
+else if(bodyImages){
+
+payload.productImages =
+bodyImages;
+
+}
+
+
+
+
+
+normalizeNumericFields(payload);
+
+
+
+return payload;
+
+
 };
 
-const validateProductPayload = (
-  payload: Record<string, unknown>,
-  isCreate = false
-) => {
-  const requiredTextFields = [
-    "productName",
-    "category",
-    "brandName",
-    "description",
-    "ingredients",
-    "targetConcerns",
-    "usageInstructions",
-    "expiryDate",
-    "manufacturerName",
-    "licenseNumber",
-    "packagingType",
-    "skinHairType",
-    "barcode",
-  ] as const;
 
-  for (const field of requiredTextFields) {
-    const value = stripHtml(payload[field]);
-    if (isCreate && !value.trim()) {
-      return { message: `${friendlyFieldNames[field]} is required` };
-    }
-  }
 
-  if (payload.productName !== undefined && !textOnlyRegex.test(stripHtml(payload.productName))) {
-    return { message: "Product name should contain only letters and spaces" };
-  }
 
-  if (payload.brandName !== undefined && !textOnlyRegex.test(stripHtml(payload.brandName))) {
-    return { message: "Brand name should contain only letters and spaces" };
-  }
 
-  if (
-    payload.manufacturerName !== undefined &&
-    !textOnlyRegex.test(stripHtml(payload.manufacturerName))
-  ) {
-    return {
-      message: "Manufacturer name should contain only letters and spaces",
-    };
-  }
 
-  if (payload.packagingType !== undefined && !textOnlyRegex.test(stripHtml(payload.packagingType))) {
-    return { message: "Packaging type should contain only letters and spaces" };
-  }
 
-  if (payload.licenseNumber !== undefined && !/^\d+$/.test(stripHtml(payload.licenseNumber))) {
-    return { message: "License number must contain digits only" };
-  }
+/* ================= FIELD NAMES ================= */
 
-  if (payload.productShortVideo !== undefined && !isValidUrl(payload.productShortVideo)) {
-    return { message: "Product short video must be a valid URL" };
-  }
 
-  if (
-    isCreate &&
-    (!payload.productImages ||
-      !Array.isArray(payload.productImages) ||
-      !payload.productImages.length)
-  ) {
-    return { message: "At least one product image is required" };
-  }
+const friendlyFieldNames:
+Record<string,string> =
+{
 
-  const numericFields = ["netQuantity", "mrpPrice", "discountedPrice", "discountPercent", "taxPercent"] as const;
-  for (const field of numericFields) {
-    if (isCreate && (payload[field] === undefined || payload[field] === null || payload[field] === "")) {
-      return { message: `${friendlyFieldNames[field]} is required` };
-    }
-    if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
-      return { message: `${friendlyFieldNames[field]} must be a valid number` };
-    }
-  }
+productName:"Product name",
 
-  return null;
+category:"Category",
+
+brandName:"Brand name",
+
+description:"Description",
+
+ingredients:"Ingredients",
+
+targetConcerns:"Target concerns",
+
+usageInstructions:"Usage instructions",
+
+expiryDate:"Expiry date",
+
+manufacturerName:"Manufacturer name",
+licenseNumber:"License / FSSAI Number",
+
+hsnCode:"HSN Code",
+
+packagingType:"Packaging type",
+
+skinHairType:"Skin / Hair type",
+
+barcode:"Barcode",
+
+netQuantity:"Net quantity",
+
+quantityUnit:"Quantity unit",
+
+mrpPrice:"MRP price",
+
+discountedPrice:"Discounted price",
+
+discountPercent:"Discount percent",
+
+taxPercent:"Tax percent",
+
+productImages:"Product images",
+
+productShortVideo:"Product video"
+
 };
 
-/** ================= CREATE PRODUCT ================= */
+
+
+
+
+
+
+/* ================= VALIDATION ================= */
+
+
+const validateProductPayload =
+(
+payload:Record<string,unknown>,
+
+isCreate=false
+
+)=>{
+
+
+
+/* CATEGORY CHECK */
+
+
+if(
+isCreate &&
+(
+!Array.isArray(payload.category)
+||
+payload.category.length===0
+)
+){
+
+return {
+message:"At least one category required"
+};
+
+}
+
+
+
+
+
+
+const requiredFields = [
+
+"productName",
+
+"brandName",
+
+"description",
+
+"ingredients",
+
+"targetConcerns",
+
+"usageInstructions",
+
+"expiryDate",
+"manufacturerName",
+
+"licenseNumber",
+
+"hsnCode",
+
+"packagingType",
+
+"skinHairType",
+
+"barcode",
+
+"netQuantity",
+
+"quantityUnit"
+
+];
+
+
+
+
+for(const field of requiredFields){
+
+
+if(
+isCreate &&
+!stripHtml(payload[field])
+){
+
+return {
+
+message:
+`${friendlyFieldNames[field]} is required`
+
+};
+
+
+}
+
+
+}
+
+
+
+
+
+
+
+/* TEXT VALIDATIONS */
+
+
+if(
+payload.productName &&
+!textOnlyRegex.test(
+stripHtml(payload.productName)
+)
+){
+
+return {
+message:
+"Product name letters only"
+};
+
+}
+
+
+
+
+
+if(
+payload.brandName &&
+!textOnlyRegex.test(
+stripHtml(payload.brandName)
+)
+){
+
+return {
+message:
+"Brand name letters only"
+};
+
+}
+
+
+
+
+
+
+// if(
+// payload.licenseNumber &&
+// !/^\d+$/.test(
+// stripHtml(payload.licenseNumber)
+// )
+// ){
+
+// return {
+// message:
+// "License number digits only"
+// };
+
+// }
+
+
+
+
+
+if(
+payload.productShortVideo &&
+!isValidUrl(
+payload.productShortVideo
+)
+){
+
+return {
+message:
+"Invalid video URL"
+};
+
+}
+
+
+
+
+
+
+
+/* IMAGE REQUIRED */
+
+
+if(
+isCreate &&
+(
+!payload.productImages ||
+!Array.isArray(payload.productImages) ||
+!payload.productImages.length
+)
+){
+
+return {
+
+message:
+"At least one product image required"
+
+};
+
+}
+
+
+
+
+
+
+
+
+/* NUMBER VALIDATION */
+
+
+[
+"mrpPrice",
+"discountedPrice",
+"discountPercent",
+"taxPercent"
+
+].forEach(()=>{});
+
+
+
+return null;
+
+
+};
+
+
+
+
+
+
+
+
+const generateProductSKU = async()=>{
+
+const now = new Date();
+
+const year = now.getFullYear();
+
+const month = String(
+now.getMonth()+1
+).padStart(2,"0");
+
+
+const prefix =
+`B2CProd-${year}${month}`;
+
+
+const lastProduct =
+await Product.findOne({
+
+productSKU:{
+$regex:`^${prefix}-`
+}
+
+})
+.sort({
+createdAt:-1
+});
+
+
+
+let nextNumber = 1;
+
+
+if(lastProduct){
+
+const lastNumber =
+Number(
+lastProduct.productSKU
+.split("-")
+.pop()
+);
+
+
+if(!isNaN(lastNumber)){
+
+nextNumber =
+lastNumber + 1;
+
+}
+
+}
+
+
+return `${prefix}-${nextNumber}`;
+
+};
+
+/* ================= CREATE ================= */
+
+
 router.post(
-  "/",
-  upload.fields([{ name: "productImages", maxCount: 10 }]),
-  async (req: Request, res: Response) => {
-    try {
-      const files = req.files as
-        | { [fieldname: string]: Express.Multer.File[] }
-        | undefined;
-      const payload = normalizeProductPayload(req, files);
-      payload.productSKU = String(payload.productSKU || `SKU-${Date.now().toString().slice(-6)}`);
-      const validationError = validateProductPayload(payload, true);
-      if (validationError) {
-        return res.status(400).json(validationError);
-      }
+"/",
 
-      const product = new Product({
-        ...payload,
-        // subCategory: undefined intentionally ignored
-      });
+upload.fields([
+{
+name:"productImages",
+maxCount:10
+}
+]),
 
-      await product.save();
-      res.status(201).json(product);
-    } catch (err: any) {
-      console.error("Create product error:", err);
-      res.status(500).json({ message: err.message });
-    }
-  }
+
+async(
+req:Request,
+res:Response
+)=>{
+
+
+try{
+
+
+const payload =
+normalizeProductPayload(
+req,
+
+req.files as any
 );
 
-/** ================= GET ALL ================= */
-router.get("/", async (_req, res) => {
-  const products = await Product.find().sort({ createdAt: -1 });
-  res.json(products);
+
+
+
+payload.productSKU =
+await generateProductSKU();
+
+
+
+const error =
+validateProductPayload(
+payload,
+true
+);
+
+
+if(error)
+
+return res
+.status(400)
+.json(error);
+
+
+
+
+
+const product =
+await Product.create(
+payload
+);
+
+
+
+res
+.status(201)
+.json(product);
+
+
+
+}
+
+
+catch(err:any){
+
+
+console.log(err);
+
+
+res.status(500).json({
+
+message:err.message
+
 });
 
-/** ================= GET ONE ================= */
-router.get("/:id", async (req, res) => {
-  const product = await Product.findById(req.params.id);
-  if (!product) return res.status(404).json({ message: "Not found" });
-  res.json(product);
+
+}
+
+
+
+}
+
+);
+
+
+
+
+
+
+
+/* ================= GET ALL ================= */
+
+
+router.get(
+"/",
+
+async(_req,res)=>{
+
+
+const products =
+await Product.find()
+.sort({
+createdAt:-1
 });
 
-/** ================= UPDATE ================= */
+
+res.json(products);
+
+
+}
+
+);
+
+
+
+
+
+
+/* ================= GET ONE ================= */
+
+
+router.get(
+"/:id",
+
+async(req,res)=>{
+
+
+const product =
+await Product.findById(
+req.params.id
+);
+
+
+
+if(!product)
+
+return res
+.status(404)
+.json({
+message:"Not found"
+});
+
+
+
+res.json(product);
+
+
+}
+
+);
+
+
+
+
+
+
+
+
+/* ================= UPDATE ================= */
+
+
 router.put(
-  "/:id",
-  upload.fields([{ name: "productImages", maxCount: 10 }]),
-  async (req, res) => {
-    try {
-      const files = req.files as
-        | { [fieldname: string]: Express.Multer.File[] }
-        | undefined;
-      const payload = normalizeProductPayload(req, files);
-      const validationError = validateProductPayload(payload, false);
-      if (validationError) {
-        return res.status(400).json(validationError);
-      }
+"/:id",
 
-      const updated = await Product.findByIdAndUpdate(
-        req.params.id,
-        {
-          ...payload,
-          // subCategory: undefined intentionally ignored
-        },
-        { new: true, runValidators: true }
-      );
+upload.fields([
+{
+name:"productImages",
+maxCount:10
+}
+]),
 
-      if (!updated) {
-        return res.status(404).json({ message: "Product not found" });
-      }
 
-      res.json(updated);
-    } catch (err: any) {
-      console.error("Update product error:", err);
-      res.status(500).json({ message: err.message });
-    }
-  }
+async(req,res)=>{
+
+
+try{
+
+
+const payload =
+normalizeProductPayload(
+req,
+req.files as any
 );
 
-/** ================= DELETE ================= */
-router.delete("/:id", async (req, res) => {
-  await Product.findByIdAndDelete(req.params.id);
-  res.json({ message: "Deleted" });
+
+
+
+const error =
+validateProductPayload(
+payload,
+false
+);
+
+
+
+if(error)
+
+return res
+.status(400)
+.json(error);
+
+
+
+
+
+const product =
+await Product.findByIdAndUpdate(
+
+req.params.id,
+
+payload,
+
+{
+new:true,
+runValidators:true
+}
+
+);
+
+
+
+
+if(!product)
+
+return res
+.status(404)
+.json({
+message:"Product not found"
 });
 
-/** ================= ADD REVIEW ================= */
-router.post("/:id/reviews", async (req, res) => {
-  const product = await Product.findById(req.params.id);
-  if (!product) return res.status(404).json({ message: "Not found" });
 
-  product.reviews.push(req.body);
 
-  const total = product.reviews.reduce((a, r) => a + r.rating, 0);
-  product.rating = total / product.reviews.length;
 
-  await product.save();
-  res.json(product);
+res.json(product);
+
+
+}
+
+
+catch(err:any){
+
+
+res.status(500)
+.json({
+message:err.message
 });
+
+
+}
+
+
+}
+
+);
+
+
+
+
+
+
+
+
+
+/* ================= DELETE ================= */
+
+
+router.delete(
+"/:id",
+
+async(req,res)=>{
+
+
+await Product.findByIdAndDelete(
+req.params.id
+);
+
+
+res.json({
+
+message:"Deleted"
+
+});
+
+
+}
+
+);
+
+
+
+
+
+
+
+
+/* ================= REVIEW ================= */
+
+
+router.post(
+"/:id/reviews",
+
+async(req,res)=>{
+
+
+const product =
+await Product.findById(
+req.params.id
+);
+
+
+
+if(!product)
+
+return res
+.status(404)
+.json({
+message:"Not found"
+});
+
+
+
+
+product.reviews.push(
+req.body
+);
+
+
+
+product.rating =
+
+product.reviews.reduce(
+(a,r)=>a+r.rating,
+0
+)
+
+/ product.reviews.length;
+
+
+
+
+await product.save();
+
+
+
+res.json(product);
+
+
+
+}
+
+);
+
+
 
 export default router;

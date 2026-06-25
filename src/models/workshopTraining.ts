@@ -4,7 +4,9 @@ export interface IWorkshopTraining {
   _id?: string;
   trainingName: string;
   trainingUniqueCode: string;
-  trainingType: string;
+  trainingType: string[];
+  hsnCode: string;
+  discountPercent: number;
   instituteName: string;
   trainingDuration: string;
   modeOfTraining: string;
@@ -48,7 +50,26 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
       trim: true,
     },
     trainingUniqueCode: { type: String, required: true, trim: true, unique: true },
-    trainingType: { type: String, required: true, trim: true },
+    trainingType: {
+      type: [String],
+      required: true,
+      validate: {
+        validator: (value: string[]) =>
+          Array.isArray(value) && value.length > 0,
+        message: "Please select at least one training type",
+      },
+    },
+    hsnCode: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    discountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
     instituteName: {
       type: String,
       required: true,

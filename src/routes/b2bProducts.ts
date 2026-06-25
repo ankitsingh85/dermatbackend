@@ -55,8 +55,9 @@ const getUploadedPath = (files: Express.Multer.File[] | undefined) => {
 };
 
 const normalizeNumericFields = (payload: Record<string, unknown>) => {
+  // NOTE: "packSize" is intentionally excluded — it now accepts numbers,
+  // symbols, and text together (e.g. "10x5 ml", "Box of 24").
   const fields = [
-    "packSize",
     "pricePerUnit",
     "bulkPriceTier",
     "moq",
@@ -93,6 +94,12 @@ const normalizeB2BPayload = (body: Record<string, unknown>) => {
     payload.promotionalTags = promotionalTags;
   }
 
+  // Category is now multi-select — always normalize to a string array.
+  const category = parseJsonArray(payload.category);
+  if (category) {
+    payload.category = category;
+  }
+
   return payload;
 };
 
@@ -118,6 +125,7 @@ const friendlyFieldNames: Record<string, string> = {
   discountedPrice: "Discounted price",
   productVideoUrl: "Product video URL",
   productImages: "Product images",
+  gst: "GST %",
 };
 
 const validateB2BPayload = (
@@ -126,9 +134,9 @@ const validateB2BPayload = (
 ) => {
   const requiredTextFields = [
     "productName",
-    "category",
     "hsnCode",
     "brandName",
+    "packSize",
     "expiryDate",
     "shelfLife",
     "description",
@@ -144,6 +152,15 @@ const validateB2BPayload = (
     if (isCreate && !stripHtml(payload[field])) {
       return { message: `${friendlyFieldNames[field]} is required` };
     }
+  }
+
+  if (
+    isCreate &&
+    (!payload.category ||
+      !Array.isArray(payload.category) ||
+      !payload.category.length)
+  ) {
+    return { message: "At least one category is required" };
   }
 
   if (
@@ -174,8 +191,13 @@ const validateB2BPayload = (
     return { message: "HSN code must contain digits only" };
   }
 
+  // packSize no longer restricted to digits — numbers, symbols, and text
+  // are all accepted (e.g. "10x5 ml", "Box of 24", "500g x 10").
+  if (isCreate && !stripHtml(payload.packSize)) {
+    return { message: "Pack size is required" };
+  }
+
   const requiredNumericFields = [
-    "packSize",
     "pricePerUnit",
     "bulkPriceTier",
     "moq",
@@ -191,13 +213,6 @@ const validateB2BPayload = (
     if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
       return { message: `${friendlyFieldNames[field]} must be a valid number` };
     }
-  }
-
-  if (
-    payload.packSize !== undefined &&
-    !digitsOnlyRegex.test(String(payload.packSize).trim())
-  ) {
-    return { message: "Pack size must contain digits only" };
   }
 
   if (
@@ -224,11 +239,57 @@ const validateB2BPayload = (
     return { message: "At least one product image is required" };
   }
 
-  if (payload.gst !== undefined && ![5, 12, 18, 28].includes(Number(payload.gst))) {
-    return { message: "GST must be one of 5, 12, 18, or 28" };
+  // GST is now a free-form percentage (0-100) instead of a fixed enum,
+  // to support the dropdown-presets + "Custom" text field on the frontend.
+  if (payload.gst !== undefined) {
+    const gstValue = Number(payload.gst);
+    if (Number.isNaN(gstValue) || gstValue < 0 || gstValue > 100) {
+      return { message: "GST % must be a valid number between 0 and 100" };
+    }
+  } else if (isCreate) {
+    return { message: "GST % is required" };
   }
 
   return null;
+};
+
+/* ================= SKU GENERATOR =================
+   Format: B2BProd-<YYYYMM>-<N>
+   e.g. "B2BProd-202606-1", "B2BProd-202606-2", "B2BProd-202606-3" ...
+   "B2BProd" is a fixed prefix. The sequence number increments dynamically
+   per month, across all B2B products.
+*/
+const SKU_PREFIX_LABEL = "B2BProd";
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const generateNextB2BSku = async () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  const prefix = `${SKU_PREFIX_LABEL}-${year}${month}-`;
+  const escapedPrefix = escapeRegExp(prefix);
+
+  const existing = await B2BProduct.find({
+    sku: { $regex: `^${escapedPrefix}\\d+$` },
+  }).select("sku");
+
+  let maxSeq = 0;
+  const seqRegex = new RegExp(`^${escapedPrefix}(\\d+)$`);
+
+  for (const product of existing) {
+    const match = product.sku?.match(seqRegex);
+    if (match) {
+      const seq = parseInt(match[1], 10);
+      if (!Number.isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+
+  return `${prefix}${maxSeq + 1}`;
 };
 
 /* ================= CREATE ================= */
@@ -264,7 +325,9 @@ router.post(
         payload.msds = uploadedMsds;
       }
 
-      payload.sku = String(payload.sku || `B2B-${Date.now().toString().slice(-6)}`);
+      // SKU is now auto-generated on the backend in the format
+      // B2BProd-YYYYMM-N, ignoring whatever (if anything) the client sent.
+      payload.sku = await generateNextB2BSku();
 
       const validationError = validateB2BPayload(payload, true);
       if (validationError) {
@@ -279,6 +342,16 @@ router.post(
       res.status(201).json(product);
     } catch (err: any) {
       console.error("B2B create error:", err);
+
+      if (err?.code === 11000) {
+        const field = Object.keys(err.keyValue || {})[0] || "field";
+        const value = err.keyValue?.[field];
+        return res.status(400).json({
+          message: `A product with this ${field} already exists (${value}).`,
+          error: err.message,
+        });
+      }
+
       res.status(500).json({ message: err.message });
     }
   }
@@ -302,7 +375,7 @@ router.put(
       const files = req.files as
         | { [fieldname: string]: Express.Multer.File[] }
         | undefined;
-      const { _id, createdAt, updatedAt, ...updateData } = req.body;
+      const { _id, createdAt, updatedAt, sku, ...updateData } = req.body;
       const payload = normalizeB2BPayload(updateData as Record<string, unknown>);
       const uploadedImages = getUploadedPaths(files?.productImages);
       const uploadedMsds = getUploadedPath(files?.msds);

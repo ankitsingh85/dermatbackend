@@ -68,98 +68,174 @@ const parseDateValue = (value: unknown) => {
   return Number.isNaN(parsedDate.getTime()) ? "INVALID_DATE" : parsedDate;
 };
 
-const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] => {
+const getUploadedPaths = (
+  files: Express.Multer.File[] | undefined,
+): string[] => {
   if (!files || files.length === 0) return [];
   return files.map((file) => `/uploads/${file.filename}`);
 };
 
-const getNextTrainingCode = async () => {
-  const latest = await WorkshopTraining.findOne({
-    trainingUniqueCode: /^WTR\d{4,}$/,
-  })
-    .sort({ trainingUniqueCode: -1 })
-    .select("trainingUniqueCode");
+/* ================= TRAINING CODE GENERATOR (fixed prefix) ================= */
 
-  const latestNumber = latest?.trainingUniqueCode.match(/(\d+)$/)?.[1];
-  const nextNumber = latestNumber ? Number(latestNumber) + 1 : 1;
+const TRAINING_CODE_PREFIX = "TrngName";
 
-  return `WTR${String(nextNumber).padStart(4, "0")}`;
+const generateTrainingUniqueCode = async () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const yearMonth = `${year}${month}`;
+
+  const lastTraining = await WorkshopTraining.findOne({
+    trainingUniqueCode: {
+      $regex: `^${TRAINING_CODE_PREFIX}${yearMonth}-`,
+    },
+  }).sort({ createdAt: -1 });
+
+  let nextSeries = 1;
+
+  if (lastTraining && lastTraining.trainingUniqueCode) {
+    const lastNumber = Number(
+      lastTraining.trainingUniqueCode.split("-").pop()
+    );
+
+    if (!isNaN(lastNumber)) {
+      nextSeries = lastNumber + 1;
+    }
+  }
+
+  return `${TRAINING_CODE_PREFIX}${yearMonth}-${nextSeries}`;
 };
 
 const normalizePayload = (
   body: Record<string, unknown>,
-  files?: { [fieldname: string]: Express.Multer.File[] }
+  files?: { [fieldname: string]: Express.Multer.File[] },
 ) => {
   const payload: Record<string, unknown> = { ...body };
 
   const numericFields = [
     "feesInr",
     "netFeesInr",
+    "discountPercent",
     "maximumSeatsBatchSize",
   ] as const;
 
-  const dateFields = [
-    "startDate",
-    "endDate",
-    "registrationDeadline",
-  ] as const;
+  const dateFields = ["startDate", "endDate", "registrationDeadline"] as const;
 
   for (const field of numericFields) {
-    const parsed = parseNumber(payload[field]);
-    payload[field] = parsed;
+    if (payload[field] !== undefined) {
+      payload[field] = parseNumber(payload[field]);
+    }
   }
 
   for (const field of dateFields) {
-    payload[field] = parseDateValue(payload[field]);
+    if (payload[field] !== undefined) {
+      payload[field] = parseDateValue(payload[field]);
+    }
   }
 
-  payload.trainingName = trimStringField(payload.trainingName);
-  payload.trainingUniqueCode = trimStringField(payload.trainingUniqueCode);
-  payload.trainingType = trimStringField(payload.trainingType);
-  payload.instituteName = trimStringField(payload.instituteName);
-  payload.trainingDuration = trimStringField(payload.trainingDuration);
-  payload.modeOfTraining = trimStringField(payload.modeOfTraining);
-  payload.curriculumTopicsCovered = trimStringField(payload.curriculumTopicsCovered);
-  payload.certificationProvided = trimStringField(payload.certificationProvided);
-  payload.affiliationAccreditation = trimStringField(payload.affiliationAccreditation);
-  payload.location = trimStringField(payload.location);
-  payload.currentAvailability = trimStringField(payload.currentAvailability);
-  payload.trainerInstructorName = trimStringField(payload.trainerInstructorName);
-  payload.trainerExperience = trimStringField(payload.trainerExperience);
-  payload.languageOfDelivery = trimStringField(payload.languageOfDelivery);
-  payload.whatsIncluded = trimStringField(payload.whatsIncluded);
-  payload.whatsNotIncluded = trimStringField(payload.whatsNotIncluded);
-  payload.learningOutcomes = trimStringField(payload.learningOutcomes);
-  payload.courseDemoVideo = trimStringField(payload.courseDemoVideo);
-  payload.refundCancellationPolicy = trimStringField(payload.refundCancellationPolicy);
-  payload.postTrainingSupport = trimStringField(payload.postTrainingSupport);
-  payload.contactForQueries = trimStringField(payload.contactForQueries);
+  const stringFields = [
+    "trainingName",
+    "trainingUniqueCode",
+    "hsnCode",
+    "instituteName",
+    "trainingDuration",
+    "modeOfTraining",
+    "curriculumTopicsCovered",
+    "certificationProvided",
+    "affiliationAccreditation",
+    "location",
+    "currentAvailability",
+    "trainerInstructorName",
+    "trainerExperience",
+    "languageOfDelivery",
+    "whatsIncluded",
+    "whatsNotIncluded",
+    "learningOutcomes",
+    "courseDemoVideo",
+    "refundCancellationPolicy",
+    "postTrainingSupport",
+    "contactForQueries",
+  ];
 
-  payload.applyDiscountVoucher = parseBoolean(payload.applyDiscountVoucher, false);
-  payload.installmentEmiOption = parseBoolean(payload.installmentEmiOption, false);
-  payload.targetAudience = parseStringArray(payload.targetAudience);
-  payload.brochurePdfDownload = parseStringArray(payload.brochurePdfDownload);
+  stringFields.forEach((field) => {
+    if (payload[field] !== undefined) {
+      payload[field] = trimStringField(payload[field]);
+    }
+  });
+
+  if (payload.applyDiscountVoucher !== undefined) {
+    payload.applyDiscountVoucher = parseBoolean(
+      payload.applyDiscountVoucher,
+      false,
+    );
+  }
+
+  if (payload.installmentEmiOption !== undefined) {
+    payload.installmentEmiOption = parseBoolean(
+      payload.installmentEmiOption,
+      false,
+    );
+  }
+
+  // TRAINING TYPE FIX (multi-select)
+
+  if (payload.trainingType !== undefined) {
+    const parsed = parseStringArray(payload.trainingType);
+
+    if (parsed.length > 0) {
+      payload.trainingType = parsed;
+    } else {
+      delete payload.trainingType;
+    }
+  }
+
+  // TARGET AUDIENCE FIX
+
+  if (payload.targetAudience !== undefined) {
+    const parsed = parseStringArray(payload.targetAudience);
+
+    if (parsed.length > 0) {
+      payload.targetAudience = parsed;
+    } else {
+      delete payload.targetAudience;
+    }
+  }
+
+  // IMAGE FIX
 
   const uploadedTrainingImages = getUploadedPaths(files?.trainingImage);
-  payload.trainingImage =
-    uploadedTrainingImages.length > 0
-      ? uploadedTrainingImages[0]
-      : trimStringField(payload.trainingImage);
+
+  if (uploadedTrainingImages.length > 0) {
+    payload.trainingImage = uploadedTrainingImages[0];
+  }
+
+  // BROCHURE FIX
 
   const uploadedBrochures = getUploadedPaths(files?.brochurePdfDownload);
-  payload.brochurePdfDownload =
-    uploadedBrochures.length > 0
-      ? uploadedBrochures
-      : parseStringArray(payload.brochurePdfDownload);
+
+  if (uploadedBrochures.length > 0) {
+    payload.brochurePdfDownload = uploadedBrochures;
+  } else if (payload.brochurePdfDownload !== undefined) {
+    const existing = parseStringArray(payload.brochurePdfDownload);
+
+    if (existing.length > 0) {
+      payload.brochurePdfDownload = existing;
+    } else {
+      delete payload.brochurePdfDownload;
+    }
+  }
 
   return payload;
 };
 
-const validatePayload = (payload: Record<string, unknown>, isCreate = false) => {
+const validatePayload = (
+  payload: Record<string, unknown>,
+  isCreate = false,
+) => {
   const requiredTextFields = [
     "trainingName",
     "trainingUniqueCode",
-    "trainingType",
+    "hsnCode",
     "instituteName",
     "trainingDuration",
     "modeOfTraining",
@@ -186,6 +262,8 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
     trainingName: "Training name",
     trainingUniqueCode: "Training unique code",
     trainingType: "Training type",
+    hsnCode: "HSN Code",
+    discountPercent: "Discount %",
     instituteName: "Institute name",
     trainingDuration: "Training duration",
     modeOfTraining: "Mode of training",
@@ -207,6 +285,9 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
     postTrainingSupport: "Post-Training Support",
     contactForQueries: "Contact for Queries",
     courseDemoVideo: "Course Demo Video",
+    feesInr: "Fees (INR)",
+    netFeesInr: "Net Fees (INR)",
+    maximumSeatsBatchSize: "Maximum Seats / Batch Size",
   };
 
   for (const field of requiredTextFields) {
@@ -215,7 +296,18 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
     }
   }
 
-  for (const field of ["startDate", "endDate", "registrationDeadline"] as const) {
+  if (
+    isCreate &&
+    (!Array.isArray(payload.trainingType) || payload.trainingType.length === 0)
+  ) {
+    return { message: "Please select at least one training type" };
+  }
+
+  for (const field of [
+    "startDate",
+    "endDate",
+    "registrationDeadline",
+  ] as const) {
     if (payload[field] === "INVALID_DATE") {
       return { message: `${labelMap[field]} must be a valid date` };
     }
@@ -232,12 +324,16 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
     payload.trainerInstructorName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.trainerInstructorName))
   ) {
-    return { message: "Trainer / instructor name should contain only letters and spaces" };
+    return {
+      message:
+        "Trainer / instructor name should contain only letters and spaces",
+    };
   }
 
   const requiredNumberFields = [
     "feesInr",
     "netFeesInr",
+    "discountPercent",
     "maximumSeatsBatchSize",
   ] as const;
 
@@ -248,16 +344,35 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
     if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
       return { message: `${labelMap[field] || field} must be a valid number` };
     }
-    if (payload[field] !== undefined && !Number.isInteger(Number(payload[field]))) {
-      return { message: `${labelMap[field] || field} must contain digits only` };
+    if (
+      payload[field] !== undefined &&
+      !Number.isInteger(Number(payload[field]))
+    ) {
+      return {
+        message: `${labelMap[field] || field} must contain digits only`,
+      };
+    }
+    if (
+      field === "discountPercent" &&
+      payload[field] !== undefined &&
+      (Number(payload[field]) < 0 || Number(payload[field]) > 100)
+    ) {
+      return { message: "Discount % must be between 0 and 100" };
     }
   }
 
-  if (payload.targetAudience !== undefined && !Array.isArray(payload.targetAudience)) {
+  if (
+    payload.targetAudience !== undefined &&
+    !Array.isArray(payload.targetAudience)
+  ) {
     return { message: "Target audience must be a valid list" };
   }
 
-  if (isCreate && Array.isArray(payload.targetAudience) && payload.targetAudience.length === 0) {
+  if (
+    isCreate &&
+    Array.isArray(payload.targetAudience) &&
+    payload.targetAudience.length === 0
+  ) {
     return { message: "At least one target audience item is required" };
   }
 
@@ -279,7 +394,9 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
 
   if (
     isCreate &&
-    (!payload.trainingImage || typeof payload.trainingImage !== "string" || !String(payload.trainingImage).trim())
+    (!payload.trainingImage ||
+      typeof payload.trainingImage !== "string" ||
+      !String(payload.trainingImage).trim())
   ) {
     return { message: "Training image is required" };
   }
@@ -302,9 +419,13 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
 
   if (
     payload.languageOfDelivery !== undefined &&
-    !["English", "Hindi", "Bilingual"].includes(String(payload.languageOfDelivery))
+    !["English", "Hindi", "Bilingual"].includes(
+      String(payload.languageOfDelivery),
+    )
   ) {
-    return { message: "Language of delivery must be English, Hindi, or Bilingual" };
+    return {
+      message: "Language of delivery must be English, Hindi, or Bilingual",
+    };
   }
 
   return null;
@@ -312,7 +433,7 @@ const validatePayload = (payload: Record<string, unknown>, isCreate = false) => 
 
 router.get("/next-code", async (_req: Request, res: Response) => {
   try {
-    const trainingUniqueCode = await getNextTrainingCode();
+    const trainingUniqueCode = await generateTrainingUniqueCode();
     return res.json({ trainingUniqueCode });
   } catch (err: any) {
     return res.status(500).json({
@@ -332,14 +453,16 @@ router.post(
       const files = req.files as
         | { [fieldname: string]: Express.Multer.File[] }
         | undefined;
-      const payload = normalizePayload(req.body as Record<string, unknown>, files);
+      const payload = normalizePayload(
+        req.body as Record<string, unknown>,
+        files,
+      );
       const validationError = validatePayload(payload, true);
       if (validationError) {
         return res.status(400).json(validationError);
       }
 
-      const requestedCode = String(payload.trainingUniqueCode || "").trim();
-      payload.trainingUniqueCode = requestedCode || (await getNextTrainingCode());
+      payload.trainingUniqueCode = await generateTrainingUniqueCode();
 
       const existing = await WorkshopTraining.findOne({
         trainingUniqueCode: String(payload.trainingUniqueCode).trim(),
@@ -365,7 +488,7 @@ router.post(
         message: err.message || "Failed to create workshop training",
       });
     }
-  }
+  },
 );
 
 router.get("/", async (_req: Request, res: Response) => {
@@ -404,7 +527,10 @@ router.put(
       const files = req.files as
         | { [fieldname: string]: Express.Multer.File[] }
         | undefined;
-      const payload = normalizePayload(req.body as Record<string, unknown>, files);
+      const payload = normalizePayload(
+        req.body as Record<string, unknown>,
+        files,
+      );
       const validationError = validatePayload(payload, false);
       if (validationError) {
         return res.status(400).json(validationError);
@@ -426,7 +552,7 @@ router.put(
       const updated = await WorkshopTraining.findByIdAndUpdate(
         req.params.id,
         payload,
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       );
 
       if (!updated) {
@@ -439,7 +565,7 @@ router.put(
         message: err.message || "Failed to update workshop training",
       });
     }
-  }
+  },
 );
 
 router.delete("/:id", async (req: Request, res: Response) => {

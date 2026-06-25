@@ -4,7 +4,7 @@ export interface ICourse {
   _id?: string;
   courseName: string;
   courseUniqueCode: string;
-  courseType: string;
+  courseType: string[];
   instituteName: string;
   courseDuration: string;
   modeOfTraining: string;
@@ -20,6 +20,9 @@ export interface ICourse {
   netFeesInr: number;
   discountsOffers: string;
   location: string;
+
+  hsnCode: string;
+  discountPercent: number;
   maximumSeatsBatchSize?: number;
   currentAvailability: string;
   trainerInstructorName: string;
@@ -49,15 +52,31 @@ const CourseSchema = new Schema<CourseDocument>(
       required: true,
       trim: true,
     },
-    courseUniqueCode: { type: String, required: true, trim: true, unique: true },
-    courseType: { type: String, required: true, trim: true },
-    instituteName: {
+
+    hsnCode: {
       type: String,
       required: true,
       trim: true,
+    },
+
+    discountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    courseUniqueCode: {
+      type: String,
+      unique: true,
+      trim: true,
+    },
+    courseType: {
+      type: [String],
+      required: true,
       validate: {
-        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
-        message: "Institute name should contain only letters and spaces",
+        validator: (value: string[]) =>
+          Array.isArray(value) && value.length > 0,
+        message: "Please select at least one course type",
       },
     },
     courseDuration: { type: String, required: true, trim: true },

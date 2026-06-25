@@ -46,7 +46,9 @@ import clinicReviewRoutes from "./routes/clinicReviewRoute";
 // ✅ CHAT ROUTES
 import chatRoutes from "./routes/chatRoute";
 import messageRoutes from "./routes/messageRoute";
-
+import courseReviewRoutes from "./routes/courseReviewRoutes";
+import productReviewRoutes from "./routes/productReviewRoute";
+import treatmentReviewRoutes from "./routes/treatmentReviewRoute";
 // ✅ EXPRESS APP (rename internally)
 const app = express();
 
@@ -105,10 +107,13 @@ app.use("/api/workshop-trainings", workshopTrainingRoutes);
 app.use("/api/training-types", trainingTypeRoutes);
 app.use("/api/hiring-requests", clinicHiringRequestRoutes);
 app.use("/api/clinic-reviews", clinicReviewRoutes);
+app.use("/api/treatment-reviews",treatmentReviewRoutes);
+
 // ✅ CHAT ROUTES
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
-
+app.use("/api/course-reviews",courseReviewRoutes);
+app.use("/api/product-reviews", productReviewRoutes);
 // -------------------- DB --------------------
 mongoose
   .connect(process.env.MONGO_URI as string)

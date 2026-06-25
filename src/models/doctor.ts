@@ -51,7 +51,7 @@ const DoctorSchema = new Schema<IDoctor>(
       unique: true,
       sparse: true,
       trim: true,
-      uppercase: true,
+
     },
 
     specialist: {

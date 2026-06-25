@@ -17,7 +17,55 @@ const isValidUrl = (value: unknown) => {
     return false;
   }
 };
+const generateTreatmentCode = async()=>{
 
+const now = new Date();
+
+const year =
+now.getFullYear();
+
+const month =
+String(now.getMonth()+1)
+.padStart(2,"0");
+
+
+const prefix =
+`TrmntPkg-${year}${month}`;
+
+
+
+const last =
+await TreatmentPlan
+.findOne({
+tuc:{
+$regex:`^${prefix}`
+}
+})
+.sort({
+createdAt:-1
+});
+
+
+
+let count = 1;
+
+
+if(last?.tuc){
+
+const lastNumber =
+Number(
+last.tuc.split("-")[2]
+);
+
+count =
+lastNumber + 1;
+
+}
+
+
+return `${prefix}-${count}`;
+
+};
 const stripHtml = (value: unknown) =>
   String(value ?? "")
     .replace(/<[^>]*>/g, " ")
@@ -141,7 +189,7 @@ router.post(
         | undefined;
 
       const {
-        tuc,
+     
         treatmentName,
         slug: incomingSlug,
         clinic,
@@ -167,7 +215,7 @@ router.post(
       const cleanShortReelUrl = String(shortReelUrl ?? "").trim();
       const rawBody = req.body as Record<string, unknown>;
 
-      if (!tuc || !cleanTreatmentName || !clinic) {
+      if ( !cleanTreatmentName || !clinic) {
         return res
           .status(400)
           .json({ message: "tuc, treatmentName and clinic are required" });
@@ -197,14 +245,39 @@ router.post(
         });
       }
 
-      if (!mongoose.isValidObjectId(clinic)) {
-        return res.status(400).json({ message: "Invalid clinic id format" });
-      }
+      const clinicsArray =
+Array.isArray(clinic)
+? clinic
+: JSON.parse(clinic);
 
-      const clinicExists = await Clinic.exists({ _id: clinic });
-      if (!clinicExists) {
-        return res.status(400).json({ message: "Invalid clinic id" });
-      }
+
+for(const id of clinicsArray){
+
+if(!mongoose.isValidObjectId(id)){
+
+return res.status(400).json({
+message:"Invalid clinic id"
+});
+
+}
+
+}
+
+const clinicCount =
+await Clinic.countDocuments({
+  _id:{
+    $in: clinicsArray
+  }
+});
+
+
+if(clinicCount !== clinicsArray.length){
+
+ return res.status(400).json({
+   message:"Some clinics are invalid"
+ });
+
+}
 
       const numericFields: Array<keyof typeof rawBody> = [
         "mrp",
@@ -254,15 +327,17 @@ router.post(
         typeof incomingSlug === "string" && incomingSlug.trim()
           ? incomingSlug.trim()
           : await buildUniqueTreatmentSlug(cleanTreatmentName);
-
+const tuc =
+await generateTreatmentCode();
       const created = await TreatmentPlan.create({
         tuc,
         treatmentName: cleanTreatmentName,
         slug,
-        clinic,
+     clinic: clinicsArray,
         description,
         shortReelUrl: cleanShortReelUrl,
-        serviceCategory: cleanServiceCategory,
+      serviceCategory:
+JSON.parse(serviceCategory),
         mrp: parseNumber(mrp),
         offerPrice: parseNumber(offerPrice),
         pricePerSession: parseNumber(pricePerSession),
@@ -402,13 +477,72 @@ router.put(
       }
 
       if (payload.clinic) {
-        if (!mongoose.isValidObjectId(String(payload.clinic))) {
-          return res.status(400).json({ message: "Invalid clinic id format" });
-        }
-        const clinicExists = await Clinic.exists({ _id: payload.clinic });
-        if (!clinicExists) {
-          return res.status(400).json({ message: "Invalid clinic id" });
-        }
+     let clinicsArray:string[] = [];
+
+
+try {
+
+ clinicsArray =
+typeof payload.clinic === "string"
+? JSON.parse(payload.clinic)
+: payload.clinic as string[];
+
+
+} catch {
+
+ return res.status(400).json({
+ message:"Invalid clinic data"
+ });
+
+}
+
+
+
+if(
+!Array.isArray(clinicsArray) ||
+clinicsArray.length===0
+){
+
+return res.status(400).json({
+message:"Please select clinic"
+});
+
+}
+
+
+
+for(const id of clinicsArray){
+
+if(!mongoose.isValidObjectId(id)){
+
+return res.status(400).json({
+message:"Invalid clinic id"
+});
+
+}
+
+}
+
+
+
+const clinicCount =
+await Clinic.countDocuments({
+
+_id:{
+$in:clinicsArray
+}
+
+});
+
+
+
+if(clinicCount !== clinicsArray.length){
+
+return res.status(400).json({
+message:"Some clinics are invalid"
+});
+
+}
       }
 
       if (payload.mrp !== undefined) payload.mrp = parseNumber(payload.mrp);

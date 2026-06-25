@@ -7,6 +7,13 @@ interface IDoctor {
   specialization: string;
 }
 
+export interface IClinicWorkingHours {
+  openTime: string; // e.g. "09:00"
+  closeTime: string; // e.g. "18:00"
+  days: string[]; // working days, e.g. ["Monday", "Tuesday", ...]
+  offDays: string[]; // clinic-off days, e.g. ["Sunday"]
+}
+
 export interface IClinic extends Document {
   cuc: string;
   clinicName: string;
@@ -33,7 +40,7 @@ export interface IClinic extends Document {
   contactNumber?: string;
   whatsapp?: string;
   email: string;
-  workingHours?: string;
+  workingHours?: IClinicWorkingHours;
   licenseNo?: string;
   experience?: string;
   treatmentsAvailable?: string;
@@ -48,6 +55,8 @@ export interface IClinic extends Document {
   clinicStatus?: string;
   verifiedBadge?: boolean;
   isActive?: boolean;
+    latitude?: number;
+  longitude?: number;
 }
 
 const DoctorSchema = new Schema<IDoctor>(
@@ -75,6 +84,16 @@ const ClinicAddressSchema = new Schema<ClinicAddress>(
   { _id: false }
 );
 
+const ClinicWorkingHoursSchema = new Schema<IClinicWorkingHours>(
+  {
+    openTime: { type: String, default: "" },
+    closeTime: { type: String, default: "" },
+    days: { type: [String], default: [] },
+    offDays: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
 const ClinicSchema = new Schema<IClinic>(
   {
     cuc: { type: String, required: true, unique: true },
@@ -89,6 +108,16 @@ const ClinicSchema = new Schema<IClinic>(
       type: Schema.Types.ObjectId,
       ref: "ClinicCategory",
       required: true,
+    },
+
+     latitude: {
+      type: Number,
+      default: null,
+    },
+
+    longitude: {
+      type: Number,
+      default: null,
     },
 
     clinicLogo: String,
@@ -113,7 +142,7 @@ const ClinicSchema = new Schema<IClinic>(
     whatsapp: String,
     email: { type: String, required: true },
 
-    workingHours: String,
+    workingHours: { type: ClinicWorkingHoursSchema, default: () => ({}) },
 
     licenseNo: String,
     experience: String,
