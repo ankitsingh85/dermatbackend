@@ -7,20 +7,31 @@ const router = express.Router();
 const escapeRegex = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const getNextClinicCategoryId = async () => {
-  const categories = await ClinicCategory.find({})
-    .select("categoryId")
-    .lean();
+const generateClinicCategoryCode = async () => {
+  const now = new Date();
 
-  const maxId = categories.reduce((max, category) => {
-    const match = category.categoryId?.match(/^ccat-(\d+)$/);
-    if (!match) return max;
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
 
-    const num = Number.parseInt(match[1], 10);
-    return Number.isNaN(num) ? max : Math.max(max, num);
-  }, 0);
+  const prefix = `ClncCgry-${year}${month}`;
 
-  return `ccat-${maxId + 1}`;
+  const lastCategory = await ClinicCategory.findOne({
+    categoryId: {
+      $regex: `^${prefix}`,
+    },
+  }).sort({ createdAt: -1 });
+
+  let count = 1;
+
+  if (lastCategory?.categoryId) {
+    const lastCount = Number(lastCategory.categoryId.split("-")[2]);
+
+    if (!Number.isNaN(lastCount)) {
+      count = lastCount + 1;
+    }
+  }
+
+  return `${prefix}-${count}`;
 };
 
 router.post("/", upload.single("imageUrl"), async (req, res) => {
@@ -46,7 +57,7 @@ router.post("/", upload.single("imageUrl"), async (req, res) => {
       return res.status(409).json({ message: "Clinic category already exists" });
     }
 
-    const categoryId = await getNextClinicCategoryId();
+  const categoryId = await generateClinicCategoryCode();
 
     const category = new ClinicCategory({
       categoryId,

@@ -1,13 +1,17 @@
 import express from "express";
 import bcrypt from "bcryptjs";
-import Admin from "../models/admin";
+import Admin, {
+  ADMIN_MODULES,
+  ADMIN_MODULE_LABELS,
+  normalizePermissions,
+} from "../models/admin";
 import { createAdmin } from "../controllers/adminController";
 
 const router = express.Router();
 
-const nameRegex = /^[A-Za-z ]+$/;
-const phoneRegex = /^\d{10}$/;
 const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+
+const FIXED_ROLES = ["superadmin", "admin"] as const;
 
 /* ================= CREATE ADMIN ================= */
 
@@ -15,13 +19,11 @@ router.post("/", createAdmin);
 
 /* ================= LIST ADMINS ================= */
 
-/* ================= LIST ADMINS ================= */
-
 router.get("/", async (_req, res) => {
   try {
     const admins = await Admin.find()
       .select(
-        "empId name email phone role lastModifiedAt lastModifiedField createdAt updatedAt",
+        "empId name email phone role customRoleLabel permissions lastModifiedAt lastModifiedField createdAt updatedAt",
       )
       .sort({
         createdAt: -1,
@@ -44,6 +46,14 @@ router.get("/", async (_req, res) => {
 
         role: admin.role,
 
+        customRoleLabel: admin.customRoleLabel || "",
+
+        permissions: admin.permissions || [],
+
+        // Surfaced so the frontend can disable the delete button for
+        // Super Admin rows without guessing from role alone.
+        isDeletable: admin.role !== "superadmin",
+
         // SAME NAME AS FRONTEND
         lastModifiedField: admin.lastModifiedField || "No modification",
 
@@ -59,6 +69,12 @@ router.get("/", async (_req, res) => {
       message: "Error fetching admins",
     });
   }
+});
+
+/* ================= AVAILABLE MODULES (for building the permission table) ================= */
+
+router.get("/modules", async (_req, res) => {
+  res.json({ modules: ADMIN_MODULES, labels: ADMIN_MODULE_LABELS });
 });
 
 /* ================= FORGOT PASSWORD BY EMAIL ================= */
@@ -107,7 +123,36 @@ router.post("/forgot-password", async (req, res) => {
   }
 });
 
-/* ================= UPDATE ADMIN ================= */
+/* ================= GET SINGLE ADMIN (used by the dashboard to load
+   the logged-in admin's own role/permissions after decoding the JWT) ================= */
+
+router.get("/:id", async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.params.id);
+
+    if (!admin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    res.json({
+      success: true,
+      admin: {
+        _id: admin._id,
+        empId: admin.empId,
+        name: admin.name,
+        email: admin.email,
+        phone: admin.phone,
+        role: admin.role,
+        customRoleLabel: admin.customRoleLabel || "",
+        permissions: admin.permissions || [],
+        isDeletable: admin.role !== "superadmin",
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch admin" });
+  }
+});
+
 /* ================= UPDATE ADMIN ================= */
 
 router.put("/:id", async (req, res) => {
@@ -120,7 +165,8 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    const { name, email, phone, role, password } = req.body;
+    const { name, email, phone, role, accessLevel, customRoleLabel, permissions, password } =
+      req.body;
 
     if (name) {
       admin.name = name.trim();
@@ -136,10 +182,30 @@ router.put("/:id", async (req, res) => {
       admin.phone = phone;
     }
 
-    if (role) {
-      admin.role = role;
+    // Accept either `role` or the older `accessLevel` field name.
+    const nextRole = role ?? accessLevel;
+    if (nextRole) {
+      const cleanRole = String(nextRole).trim().toLowerCase();
+      admin.role = cleanRole;
+      admin.customRoleLabel = FIXED_ROLES.includes(cleanRole as any)
+        ? ""
+        : String(customRoleLabel ?? admin.customRoleLabel ?? "").trim();
 
       admin.lastModifiedField = "Access Level Changed";
+    } else if (
+      customRoleLabel !== undefined &&
+      !FIXED_ROLES.includes(admin.role as any)
+    ) {
+      admin.customRoleLabel = String(customRoleLabel).trim();
+    }
+
+    if (permissions !== undefined) {
+      // Super Admin's permissions can't be downgraded via this route —
+      // the model's pre-save hook re-forces full access for that role
+      // anyway, but we skip the wasted work here too.
+      if (admin.role !== "superadmin") {
+        admin.permissions = normalizePermissions(permissions);
+      }
     }
 
     if (password) {
@@ -170,13 +236,23 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const admin = await Admin.findByIdAndDelete(req.params.id);
+    const admin = await Admin.findById(req.params.id);
 
     if (!admin) {
       return res.status(404).json({
         message: "Admin not found",
       });
     }
+
+    // Super Admin accounts can never be deleted — enforced here, not
+    // just hidden in the UI, so a direct API call can't bypass it.
+    if (admin.role === "superadmin") {
+      return res.status(403).json({
+        message: "Super Admin accounts cannot be deleted",
+      });
+    }
+
+    await Admin.findByIdAndDelete(req.params.id);
 
     res.json({
       message: "Admin deleted successfully",

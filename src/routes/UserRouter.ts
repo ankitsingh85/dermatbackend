@@ -38,7 +38,31 @@ const deleteStoredFile = async (storedPath?: string | null) => {
     // ignore cleanup failures
   }
 };
+const generatePatientId = async () => {
+  const now = new Date();
 
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  const prefix = `Cust-${year}${month}`;
+
+  const lastUser = await User.findOne({
+    patientId: {
+      $regex: `^${prefix}`,
+    },
+  }).sort({ createdAt: -1 });
+
+  let count = 1;
+
+  if (lastUser?.patientId) {
+    const lastCount = Number(lastUser.patientId.split("-")[2]);
+    if (!Number.isNaN(lastCount)) {
+      count = lastCount + 1;
+    }
+  }
+
+  return `${prefix}-${count}`;
+};
 /* ================= GET CURRENT USER (ME) ================= */
 router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
   try {
@@ -75,16 +99,14 @@ router.get("/me", userAuth, async (req: UserAuthRequest, res) => {
 router.post("/", upload.single("profileImage"), async (req, res) => {
   try {
     const {
-      patientId,
+    
       name,
       email,
       contactNo,
       address,
     } = req.body;
     const uploadedProfileImage = getUploadedPath(req.file);
-    const resolvedPatientId = patientId
-      ? String(patientId).trim()
-      : `PAT-${Date.now().toString().slice(-6)}`;
+const resolvedPatientId = await generatePatientId();
     const cleanName = String(name ?? "").trim();
     const cleanEmail = String(email ?? "").trim().toLowerCase();
     const cleanContactNo = String(contactNo ?? "").trim();
@@ -110,9 +132,12 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
         .json({ message: "Contact No. must contain exactly 10 digits" });
     }
 
-    const exists = await User.findOne({
-      $or: [{ email: cleanEmail }, { contactNo: cleanContactNo }, { patientId: resolvedPatientId }],
-    });
+  const exists = await User.findOne({
+  $or: [
+    { email: cleanEmail },
+    { contactNo: cleanContactNo }
+  ]
+});
     if (exists) {
       return res.status(400).json({ message: "User with same email, contact number or ID already exists" });
     }

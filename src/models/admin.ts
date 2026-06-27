@@ -6,6 +6,63 @@ const phoneRegex = /^\d{10}$/;
 
 const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
+/* ================= ADMIN PANEL MODULES =================
+   These match the actual left-panel sidebar modules in the admin
+   dashboard (see dashboardModules in the SuperAdminDashboard page).
+   Each module gets its own View / Create-Modify / Delete checkboxes
+   in the permissions table.
+*/
+export const ADMIN_MODULES = [
+  "admin",
+  "user",
+  "productCategory",
+  "product",
+  "courseType",
+  "trainingType",
+  "course",
+  "workshopTraining",
+  "doctor",
+  "clinicCategory",
+  "clinic",
+  "b2bProductCategory",
+  "b2bProduct",
+  "serviceCategory",
+  "treatment",
+  // Groups the "OTHERS" sidebar dropdown (Top Products, Offers,
+  // Shorts, Hiring Requests) under a single permission toggle.
+  "others",
+] as const;
+
+export type AdminModule = (typeof ADMIN_MODULES)[number];
+
+// Human-readable labels for the permission table / any UI that needs
+// to display a module nicely instead of its raw key.
+export const ADMIN_MODULE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  user: "User",
+  productCategory: "Product Category",
+  product: "Product",
+  courseType: "Course Type",
+  trainingType: "Training Type",
+  course: "Course",
+  workshopTraining: "Workshop Training",
+  doctor: "Doctor",
+  clinicCategory: "Clinic Category",
+  clinic: "Clinic",
+  b2bProductCategory: "B2B Product Category",
+  b2bProduct: "B2B Product",
+  serviceCategory: "Treatment Category",
+  treatment: "Treatment Plans",
+  others: "Others (Top Products, Offers, Shorts, Hiring Requests)",
+};
+
+export interface IAdminPermission {
+  module: string;
+  view: boolean;
+  create: boolean; // covers create + modify/edit
+  delete: boolean;
+}
+
 /* ================= INTERFACE ================= */
 
 export interface IAdmin extends Document {
@@ -21,20 +78,93 @@ export interface IAdmin extends Document {
 
   resetOtp?: string;
 
-resetOtpExpire?: Date;
+  resetOtpExpire?: Date;
 
-  role: "admin" | "superadmin" | "manager";
+  // Fixed tiers are "superadmin" and "admin" (System Admin). Anything
+  // else (e.g. "manager" or a custom typed role like "support-staff")
+  // falls into the "any other category" bucket that uses the
+  // permissions table below.
+  role: string;
+
+  // Free-text label shown in the UI when a custom role name was typed
+  // instead of picking "Manager" from the dropdown (e.g. "Support Staff").
+  customRoleLabel?: string;
+
+  // Per-module access grants. Ignored / forced to full-access for
+  // role === "superadmin".
+  permissions: IAdminPermission[];
 
   lastModifiedAt?: Date;
 
   lastModifiedField?: string;
 
-
-  
   comparePassword(password: string): Promise<boolean>;
 }
 
+/* ================= HELPERS ================= */
+
+export const buildFullAccessPermissions = (): IAdminPermission[] =>
+  ADMIN_MODULES.map((module) => ({
+    module,
+    view: true,
+    create: true,
+    delete: true,
+  }));
+
+export const buildEmptyPermissions = (): IAdminPermission[] =>
+  ADMIN_MODULES.map((module) => ({
+    module,
+    view: false,
+    create: false,
+    delete: false,
+  }));
+
+// Always returns a complete permissions array covering every module,
+// even if the caller only sent a partial list — missing modules default
+// to no access instead of being silently dropped.
+export const normalizePermissions = (value: unknown): IAdminPermission[] => {
+  let parsed: any[] = [];
+
+  if (Array.isArray(value)) {
+    parsed = value;
+  } else if (typeof value === "string" && value.trim()) {
+    try {
+      const json = JSON.parse(value);
+      if (Array.isArray(json)) parsed = json;
+    } catch {
+      parsed = [];
+    }
+  }
+
+  const byModule = new Map<string, IAdminPermission>();
+  for (const item of parsed) {
+    const moduleName = String(item?.module ?? "").trim();
+    if (!moduleName) continue;
+    byModule.set(moduleName, {
+      module: moduleName,
+      view: Boolean(item?.view),
+      create: Boolean(item?.create),
+      delete: Boolean(item?.delete),
+    });
+  }
+
+  return ADMIN_MODULES.map(
+    (module) =>
+      byModule.get(module) || { module, view: false, create: false, delete: false }
+  );
+};
+
 /* ================= SCHEMA ================= */
+
+const AdminPermissionSchema = new Schema<IAdminPermission>(
+  {
+    module: { type: String, required: true },
+    view: { type: Boolean, default: false },
+    create: { type: Boolean, default: false },
+    delete: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
 
 const adminSchema = new Schema<IAdmin>(
   {
@@ -118,14 +248,26 @@ const adminSchema = new Schema<IAdmin>(
       },
     },
 
-    /* ACCESS LEVEL OPTIONAL */
-
+    /* ACCESS LEVEL — flexible string so custom role names are allowed.
+       "superadmin" and "admin" (System Admin) are the two fixed/protected
+       tiers; anything else is treated as "any other category" and uses
+       the permissions table. */
     role: {
       type: String,
+      trim: true,
+      lowercase: true,
+      default: "manager",
+    },
 
-      enum: ["admin", "superadmin", "manager"],
+    customRoleLabel: {
+      type: String,
+      trim: true,
+      default: "",
+    },
 
-      default: "admin",
+    permissions: {
+      type: [AdminPermissionSchema],
+      default: () => buildEmptyPermissions(),
     },
 
     /* LAST UPDATE */
@@ -144,7 +286,7 @@ const adminSchema = new Schema<IAdmin>(
   },
 );
 
-/* ================= AUTO ADMIN CODE ================= */
+/* ================= AUTO ADMIN CODE + PERMISSION LOCK ================= */
 
 adminSchema.pre(
   "save",
@@ -183,6 +325,15 @@ adminSchema.pre(
       this.empId = `${prefix}-${nextNo}`;
     }
 
+    /* SUPER ADMIN ALWAYS GETS FULL ACCESS — regardless of whatever
+       permissions payload the client sent. This is enforced here so it
+       can never be downgraded by a bad request. */
+    if (this.role === "superadmin") {
+      this.permissions = buildFullAccessPermissions();
+    } else if (this.isModified("permissions") && !this.permissions?.length) {
+      this.permissions = buildEmptyPermissions();
+    }
+
     /* PASSWORD CHANGE */
 
     if (this.isModified("password")) {
@@ -207,6 +358,12 @@ adminSchema.pre(
       this.lastModifiedAt = new Date();
 
       this.lastModifiedField = "Access Level Changed";
+    }
+
+    if (this.isModified("permissions") && this.role !== "superadmin") {
+      this.lastModifiedAt = new Date();
+
+      this.lastModifiedField = "Permissions Changed";
     }
 
     next();

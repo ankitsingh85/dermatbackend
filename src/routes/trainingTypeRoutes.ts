@@ -7,23 +7,38 @@ const router = express.Router();
 const escapeRegex = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const getNextTrainingTypeId = async () => {
-  const trainingTypes = await TrainingType.find({})
-    .select("id")
-    .lean();
 
-  const maxId = trainingTypes.reduce((max, item) => {
-    const match = item.id?.match(/^ttype-(\d+)$/);
-    if (!match) return max;
+const generateTrainingTypeCode = async () => {
 
-    const num = Number.parseInt(match[1], 10);
-    return Number.isNaN(num) ? max : Math.max(max, num);
-  }, 0);
+  const now = new Date();
 
-  return `ttype-${maxId + 1}`;
-};
+  const year = now.getFullYear();
 
-router.get("/", async (_req, res) => {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  const prefix = `TrngType-${year}${month}`;
+
+  const lastTrainingType = await TrainingType.findOne({
+    id: {
+      $regex: `^${prefix}`,
+    },
+  }).sort({ createdAt: -1 });
+
+  let count = 1;
+
+  if (lastTrainingType?.id) {
+
+    const lastCount = Number(
+      lastTrainingType.id.split("-")[2]
+    );
+
+    if (!Number.isNaN(lastCount)) {
+      count = lastCount + 1;
+    }
+  }
+
+  return `${prefix}-${count}`;
+};router.get("/", async (_req, res) => {
   try {
     const trainingTypes = await TrainingType.find({})
       .select("id name imageUrl createdAt")
@@ -57,8 +72,7 @@ router.post("/", upload.single("imageUrl"), async (req, res) => {
       return res.status(409).json({ message: "Training type already exists" });
     }
 
-    const newId = await getNextTrainingTypeId();
-
+const newId = await generateTrainingTypeCode();
     const trainingType = new TrainingType({
       id: newId,
       name: String(name).trim(),

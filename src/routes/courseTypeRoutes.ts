@@ -3,7 +3,34 @@ import CourseType from "../models/courseType";
 import upload from "../middleware/uploads";
 
 const router = express.Router();
+const generateCourseTypeCode = async () => {
 
+  const now = new Date();
+
+  const year = now.getFullYear();
+
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  const prefix = `CourType-${year}${month}`;
+
+  const lastCourseType = await CourseType.findOne({
+    id: {
+      $regex: `^${prefix}`,
+    },
+  }).sort({ createdAt: -1 });
+
+  let count = 1;
+
+  if (lastCourseType?.id) {
+    const lastCount = Number(lastCourseType.id.split("-")[2]);
+
+    if (!Number.isNaN(lastCount)) {
+      count = lastCount + 1;
+    }
+  }
+
+  return `${prefix}-${count}`;
+};
 router.get("/", async (_req, res) => {
   try {
     const courseTypes = await CourseType.find({})
@@ -36,19 +63,15 @@ router.post("/", upload.single("imageUrl"), async (req, res) => {
       return res.status(409).json({ message: "Course type already exists" });
     }
 
-    const last = await CourseType.findOne({}).sort({ createdAt: -1 }).lean();
-    let newId = "ctype-1";
-    if (last?.id) {
-      const num = parseInt(last.id.split("-")[1], 10);
-      newId = `ctype-${Number.isNaN(num) ? 1 : num + 1}`;
-    }
+ 
 
-    const courseType = new CourseType({
-      id: newId,
-      name: String(name).trim(),
-      imageUrl: uploadedImageUrl || legacyImageUrl,
-    });
+   const courseTypeCode = await generateCourseTypeCode();
 
+const courseType = new CourseType({
+  id: courseTypeCode,
+  name: String(name).trim(),
+  imageUrl: uploadedImageUrl || legacyImageUrl,
+});
     await courseType.save();
     res.status(201).json(courseType);
   } catch (err: any) {
