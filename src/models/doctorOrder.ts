@@ -18,6 +18,9 @@ export interface IDoctorOrder extends Document {
     address: string;
   };
   paymentStatus?: "pending" | "success" | "failed";
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  razorpaySignature?: string;
   status?: "Pending" | "Shipped" | "Delivered" | "Cancelled";
   createdAt?: Date;
   updatedAt?: Date;
@@ -70,6 +73,9 @@ const DoctorOrderSchema = new Schema<IDoctorOrder>(
       enum: ["pending", "success", "failed"],
       default: "success",
     },
+    razorpayOrderId: { type: String },
+    razorpayPaymentId: { type: String },
+    razorpaySignature: { type: String },
     status: {
       type: String,
       enum: ["Pending", "Shipped", "Delivered", "Cancelled"],

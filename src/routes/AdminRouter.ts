@@ -1,17 +1,21 @@
 import express from "express";
-import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import Admin, {
   ADMIN_MODULES,
   ADMIN_MODULE_LABELS,
   normalizePermissions,
 } from "../models/admin";
 import { createAdmin } from "../controllers/adminController";
+import { sendMail } from "../utils/email";
 
 const router = express.Router();
 
 const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 const FIXED_ROLES = ["superadmin", "admin"] as const;
+
+const hashOtp = (otp: string) =>
+  crypto.createHash("sha256").update(otp).digest("hex");
 
 /* ================= CREATE ADMIN ================= */
 
@@ -77,15 +81,68 @@ router.get("/modules", async (_req, res) => {
   res.json({ modules: ADMIN_MODULES, labels: ADMIN_MODULE_LABELS });
 });
 
-/* ================= FORGOT PASSWORD BY EMAIL ================= */
+/* ================= FORGOT PASSWORD: SEND EMAIL OTP ================= */
 
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password/send-otp", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
 
-    if (!email || !password) {
+    if (!email) {
       return res.status(400).json({
-        message: "Email and password required",
+        message: "Email is required",
+      });
+    }
+
+    const admin = await Admin.findOne({ email }).select("+resetOtp +resetOtpExpire");
+
+    if (!admin) {
+      return res.status(404).json({
+        message: "Admin email not found",
+      });
+    }
+
+    const otp = String(crypto.randomInt(100000, 1000000));
+
+    admin.resetOtp = hashOtp(otp);
+    admin.resetOtpExpire = new Date(Date.now() + 10 * 60 * 1000);
+
+    await admin.save();
+
+    await sendMail(
+      email,
+      "Admin password reset OTP",
+      `Your Dr Dermat admin password reset OTP is ${otp}. It is valid for 10 minutes. If you did not request this, please ignore this email.`,
+    );
+
+    res.json({
+      message: "Verification OTP sent to your email",
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      message: "Unable to send reset OTP",
+    });
+  }
+});
+
+/* ================= FORGOT PASSWORD: VERIFY OTP AND RESET ================= */
+
+router.post("/forgot-password/reset", async (req, res) => {
+  try {
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const otp = String(req.body?.otp ?? "").trim();
+    const password = String(req.body?.password ?? "");
+
+    if (!email || !otp || !password) {
+      return res.status(400).json({
+        message: "Email, OTP and password are required",
+      });
+    }
+
+    if (!/^\d{6}$/.test(otp)) {
+      return res.status(400).json({
+        message: "Enter a valid 6 digit OTP",
       });
     }
 
@@ -95,9 +152,9 @@ router.post("/forgot-password", async (req, res) => {
       });
     }
 
-    const admin = await Admin.findOne({
-      email: email.toLowerCase().trim(),
-    });
+    const admin = await Admin.findOne({ email }).select(
+      "+password +resetOtp +resetOtpExpire",
+    );
 
     if (!admin) {
       return res.status(404).json({
@@ -105,9 +162,25 @@ router.post("/forgot-password", async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    if (
+      !admin.resetOtp ||
+      !admin.resetOtpExpire ||
+      admin.resetOtpExpire.getTime() < Date.now()
+    ) {
+      return res.status(400).json({
+        message: "OTP expired. Please request a new OTP",
+      });
+    }
 
-    admin.password = hashedPassword;
+    if (admin.resetOtp !== hashOtp(otp)) {
+      return res.status(400).json({
+        message: "Invalid OTP",
+      });
+    }
+
+    admin.password = password;
+    admin.resetOtp = undefined;
+    admin.resetOtpExpire = undefined;
 
     await admin.save();
 

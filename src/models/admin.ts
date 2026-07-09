@@ -29,7 +29,7 @@ export const ADMIN_MODULES = [
   "serviceCategory",
   "treatment",
   // Groups the "OTHERS" sidebar dropdown (Top Products, Offers,
-  // Shorts, Hiring Requests) under a single permission toggle.
+  // Featured Section, Shorts, Hiring Requests) under a single permission toggle.
   "others",
 ] as const;
 
@@ -53,7 +53,7 @@ export const ADMIN_MODULE_LABELS: Record<string, string> = {
   b2bProduct: "B2B Product",
   serviceCategory: "Treatment Category",
   treatment: "Treatment Plans",
-  others: "Others (Top Products, Offers, Shorts, Hiring Requests)",
+  others: "Others (Top Products, Offers, Featured Section, Shorts, Hiring Requests)",
 };
 
 export interface IAdminPermission {
@@ -246,6 +246,16 @@ const adminSchema = new Schema<IAdmin>(
 
         message: "Password must contain letter number symbol",
       },
+    },
+
+    resetOtp: {
+      type: String,
+      select: false,
+    },
+
+    resetOtpExpire: {
+      type: Date,
+      select: false,
     },
 
     /* ACCESS LEVEL — flexible string so custom role names are allowed.

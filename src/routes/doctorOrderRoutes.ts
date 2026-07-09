@@ -63,7 +63,16 @@ const matchesOrderType = (order: any, requestedType?: string) => {
 
 router.post("/", async (req, res) => {
   try {
-    const { doctorId, products, totalAmount, address, orderType } = req.body;
+    const {
+      doctorId,
+      products,
+      totalAmount,
+      address,
+      orderType,
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
+    } = req.body;
 
     if (!doctorId || !products || !totalAmount || !address) {
       return res.status(400).json({ message: "All fields are required" });
@@ -81,6 +90,9 @@ router.post("/", async (req, res) => {
       address,
       orderType: normalizeOrderType(orderType),
       paymentStatus: "success",
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
     });
 
     const savedOrder = await order.save();

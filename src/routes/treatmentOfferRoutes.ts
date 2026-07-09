@@ -12,6 +12,44 @@ const router = express.Router();
 const getUploadedPath = (file?: Express.Multer.File) =>
   file ? `/uploads/${file.filename}` : "";
 
+const normalizeMatcher = (value: unknown) => String(value ?? "").trim().toLowerCase();
+
+const getCategoryValues = (value: unknown): string[] => {
+  if (!value) return [];
+
+  if (typeof value === "string" || value instanceof mongoose.Types.ObjectId) {
+    return [String(value)];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(getCategoryValues);
+  }
+
+  if (typeof value === "object") {
+    const category = value as { _id?: unknown; id?: unknown; name?: unknown };
+    return [category._id, category.id, category.name]
+      .filter(Boolean)
+      .map((item) => String(item));
+  }
+
+  return [];
+};
+
+const treatmentMatchesCategory = (
+  treatment: { serviceCategory?: unknown } | null,
+  category: { _id?: unknown; id?: unknown; name?: unknown } | null,
+) => {
+  if (!treatment || !category) return false;
+
+  const categoryMatchers = new Set(
+    getCategoryValues(category).map(normalizeMatcher).filter(Boolean),
+  );
+
+  return getCategoryValues(treatment.serviceCategory).some((item) =>
+    categoryMatchers.has(normalizeMatcher(item)),
+  );
+};
+
 const normalizeOfferPayload = (offer: any) => {
   const source = typeof offer?.toObject === "function" ? offer.toObject() : offer;
   if (!source) return source;
@@ -94,9 +132,7 @@ router.post(
         return res.status(404).json({ message: "Treatment plan not found" });
       }
 
-      const treatmentCategory = (treatment.serviceCategory || "").trim().toLowerCase();
-      const selectedCategory = category.name.trim().toLowerCase();
-      if (treatmentCategory && treatmentCategory !== selectedCategory) {
+      if (!treatmentMatchesCategory(treatment, category)) {
         await deleteUploadedFiles(files);
         return res.status(400).json({
           message: "Selected treatment plan does not belong to the chosen category",
@@ -183,9 +219,7 @@ router.put(
       if (resolvedCategoryId && resolvedTreatmentId) {
         const category = await ServiceCategory.findById(resolvedCategoryId);
         const treatment = await TreatmentPlan.findById(resolvedTreatmentId);
-        const treatmentCategory = (treatment?.serviceCategory || "").trim().toLowerCase();
-        const selectedCategory = (category?.name || "").trim().toLowerCase();
-        if (treatmentCategory && selectedCategory && treatmentCategory !== selectedCategory) {
+        if (!treatmentMatchesCategory(treatment, category)) {
           await deleteStoredFile(updatePayload.$set.imageUrl);
           return res.status(400).json({
             message: "Selected treatment plan does not belong to the chosen category",
