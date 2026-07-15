@@ -10,6 +10,7 @@ import {
   parseClinicAddresses,
   type ClinicAddress,
 } from "../utils/clinicAddresses";
+import { sendMail } from "../utils/email";
 const router = express.Router();
 /* ================= LOCATION HELPERS ================= */
 
@@ -373,6 +374,7 @@ router.post(
       email,
       contactNo,
       contactNumber,
+      whatsapp,
       doctors,
       workingHours,
       video,
@@ -381,8 +383,17 @@ router.post(
       ...rest
     } = req.body;
 
-    if (!clinicName || !dermaCategory || !address || !email) {
-      return res.status(400).json({ message: "Missing required fields" });
+    const normalizedContactNumber =
+      normalizeContactNumber(contactNumber) ||
+      normalizeContactNumber(contactNo);
+    const normalizedWhatsapp = normalizeContactNumber(whatsapp);
+
+    // Only clinic name, category, contact number and WhatsApp number are
+    // mandatory to create a clinic — everything else is optional.
+    if (!clinicName || !dermaCategory || !normalizedContactNumber || !normalizedWhatsapp) {
+      return res.status(400).json({
+        message: "Clinic name, category, contact number and WhatsApp number are required",
+      });
     }
 
     const categoryExists = await ClinicCategory.findById(dermaCategory);
@@ -392,9 +403,6 @@ router.post(
 
     const parsedDoctors = normalizeDoctors(doctors);
     const parsedWorkingHours = parseWorkingHours(workingHours);
-    const normalizedContactNumber =
-      normalizeContactNumber(contactNumber) ||
-      normalizeContactNumber(contactNo);
 
     // CUC now uses a fixed "ClinicName" prefix + current year/month + a
     // global sequence number that increments per month, e.g.
@@ -403,12 +411,14 @@ router.post(
 
     const clinicAddresses = buildClinicAddressesFromRequest(
       req.body,
-      String(address).trim(),
+      String(address ?? "").trim(),
       String(clinicName).trim(),
       normalizedContactNumber
     );
     const nextAddressText =
-      clinicAddresses[0]?.address || formatClinicAddressText(clinicAddresses[0]) || String(address).trim();
+      clinicAddresses[0]?.address ||
+      formatClinicAddressText(clinicAddresses[0]) ||
+      String(address ?? "").trim();
 
     const uploadedClinicLogo = getUploadedPaths(files?.clinicLogo);
     const uploadedBannerImage = getUploadedPaths(files?.bannerImage);
@@ -424,7 +434,7 @@ const location = extractLatLngFromMapLink(rest.mapLink);
       dermaCategory,
       address: nextAddressText,
       addresses: clinicAddresses,
-   email: String(email).trim(),
+      ...(email ? { email: String(email).trim() } : {}),
 
 
 // ADD THESE TWO
@@ -438,9 +448,8 @@ location?.longitude || null,
 
 
 
-...(normalizedContactNumber 
-? { contactNumber: normalizedContactNumber } 
-: {}),
+      contactNumber: normalizedContactNumber,
+      whatsapp: normalizedWhatsapp,
       doctors: parsedDoctors,
       workingHours: parsedWorkingHours,
       clinicLogo: uploadedClinicLogo[0] || undefined,
@@ -602,7 +611,7 @@ router.get("/", async (req, res) => {
     if (lightMode) {
       const clinics = await Clinic.find()
         .select(
-          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus verifiedBadge isActive doctors clinicLogo bannerImage photos workingHours createdAt updatedAt"
+          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus verifiedBadge isActive doctors clinicLogo bannerImage photos workingHours approvalStatus rejectionReason approvedAt createdAt updatedAt"
         )
         .populate("dermaCategory", "name")
         .lean();
@@ -785,6 +794,64 @@ if(updateLocation){
   }
   }
 );
+
+/* ================= APPROVE CLINIC REGISTRATION ================= */
+router.patch("/:id/approve", async (req, res) => {
+  try {
+    const clinic = await Clinic.findById(req.params.id);
+    if (!clinic) {
+      return res.status(404).json({ message: "Clinic not found" });
+    }
+
+    clinic.approvalStatus = "approved";
+    clinic.rejectionReason = "";
+    clinic.approvedAt = new Date();
+    await clinic.save();
+
+    if (clinic.email) {
+      sendMail(
+        clinic.email,
+        "Your clinic registration has been approved",
+        `Good news! Your clinic "${clinic.clinicName}" has been approved by the Dr Dermat admin team. You can now log in and access your clinic dashboard.`
+      ).catch((err) => console.error("Failed to send approval email:", err));
+    }
+
+    res.json({ message: "Clinic approved successfully", clinic });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to approve clinic" });
+  }
+});
+
+/* ================= REJECT CLINIC REGISTRATION ================= */
+router.patch("/:id/reject", async (req, res) => {
+  try {
+    const clinic = await Clinic.findById(req.params.id);
+    if (!clinic) {
+      return res.status(404).json({ message: "Clinic not found" });
+    }
+
+    const reason = String(req.body?.reason ?? "").trim();
+
+    clinic.approvalStatus = "rejected";
+    clinic.rejectionReason = reason;
+    clinic.approvedAt = undefined;
+    await clinic.save();
+
+    if (clinic.email) {
+      sendMail(
+        clinic.email,
+        "Your clinic registration was not approved",
+        `We're sorry, your clinic "${clinic.clinicName}" registration was not approved by the Dr Dermat admin team.${
+          reason ? ` Reason: ${reason}.` : ""
+        } If you have questions, please contact support.`
+      ).catch((err) => console.error("Failed to send rejection email:", err));
+    }
+
+    res.json({ message: "Clinic rejected", clinic });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to reject clinic" });
+  }
+});
 
 /* ================= DELETE CLINIC ================= */
 router.delete("/:id", async (req, res) => {

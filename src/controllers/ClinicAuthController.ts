@@ -188,6 +188,10 @@ let clinic = await Clinic.findOne({
         ownerName: ownerName || undefined,
         whatsapp: whatsapp || undefined,
         clinicStatus: "Open",
+        // New self-registrations wait for an admin to approve them
+        // before they can actually log in — see the approvalStatus
+        // check below.
+        approvalStatus: "pending",
       });
     } else {
       const nextUpdates: Record<string, unknown> = {};
@@ -224,6 +228,25 @@ let clinic = await Clinic.findOne({
   otpSessionId,
   contactNo
 );
+
+    // Admin approval gate — a clinic can't actually log in until an
+    // admin has reviewed and approved its registration.
+    if (clinic.approvalStatus === "pending") {
+      return res.status(403).json({
+        message:
+          "Your clinic registration is submitted and pending admin approval. You'll receive an email once it's reviewed.",
+        pendingApproval: true,
+      });
+    }
+
+    if (clinic.approvalStatus === "rejected") {
+      return res.status(403).json({
+        message: clinic.rejectionReason
+          ? `Your clinic registration was rejected: ${clinic.rejectionReason}`
+          : "Your clinic registration was rejected by the admin.",
+        rejected: true,
+      });
+    }
 
 const token = generateToken(
   clinic._id.toString(),

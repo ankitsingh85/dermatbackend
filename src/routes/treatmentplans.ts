@@ -215,10 +215,13 @@ router.post(
       const cleanShortReelUrl = String(shortReelUrl ?? "").trim();
       const rawBody = req.body as Record<string, unknown>;
 
-      if ( !cleanTreatmentName || !clinic) {
+      // Only treatmentName, serviceCategory and offerPrice are mandatory —
+      // everything else (clinic, description, images, reel URL, other
+      // pricing/detail fields) is optional.
+      if (!cleanTreatmentName) {
         return res
           .status(400)
-          .json({ message: "tuc, treatmentName and clinic are required" });
+          .json({ message: "Treatment plan name is required" });
       }
 
       if (!textOnlyRegex.test(cleanTreatmentName)) {
@@ -233,22 +236,18 @@ router.post(
         });
       }
 
-      if (!stripHtml(description)) {
-        return res.status(400).json({
-          message: "Description is required",
-        });
-      }
-
-      if (!isValidUrl(cleanShortReelUrl)) {
+      if (cleanShortReelUrl && !isValidUrl(cleanShortReelUrl)) {
         return res.status(400).json({
           message: "Treatment short reel must be a valid URL",
         });
       }
 
       const clinicsArray =
-Array.isArray(clinic)
-? clinic
-: JSON.parse(clinic);
+        clinic === undefined || clinic === null || clinic === ""
+          ? []
+          : Array.isArray(clinic)
+          ? clinic
+          : JSON.parse(clinic);
 
 
 for(const id of clinicsArray){
@@ -279,6 +278,17 @@ if(clinicCount !== clinicsArray.length){
 
 }
 
+      const offerPriceValue = rawBody.offerPrice;
+      if (
+        offerPriceValue === undefined ||
+        offerPriceValue === null ||
+        offerPriceValue === ""
+      ) {
+        return res.status(400).json({
+          message: `${friendlyNumericFieldNames.offerPrice} is required`,
+        });
+      }
+
       const numericFields: Array<keyof typeof rawBody> = [
         "mrp",
         "offerPrice",
@@ -287,11 +297,7 @@ if(clinicCount !== clinicsArray.length){
       ];
       for (const field of numericFields) {
         const value = rawBody[field];
-        if (value === undefined || value === null || value === "") {
-          return res.status(400).json({
-            message: `${friendlyNumericFieldNames[String(field)] || String(field)} is required`,
-          });
-        }
+        if (value === undefined || value === null || value === "") continue;
         if (!digitsOnlyRegex.test(String(value))) {
           return res
             .status(400)
@@ -317,12 +323,6 @@ if(clinicCount !== clinicsArray.length){
         ? getUploadedPaths(files?.treatmentImages)
         : parseUploadedStringArray(req.body.treatmentImages);
 
-      if (!treatmentImages.length) {
-        return res.status(400).json({
-          message: "At least one treatment image is required",
-        });
-      }
-
       const slug =
         typeof incomingSlug === "string" && incomingSlug.trim()
           ? incomingSlug.trim()
@@ -342,7 +342,10 @@ JSON.parse(serviceCategory),
         offerPrice: parseNumber(offerPrice),
         pricePerSession: parseNumber(pricePerSession),
         discountPercent: parseNumber(discountPercent),
-        sessions: String(sessions).trim(),
+        sessions:
+          sessions !== undefined && sessions !== null && sessions !== ""
+            ? String(sessions).trim()
+            : undefined,
         duration,
         validity,
         technologyUsed,

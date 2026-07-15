@@ -1,41 +1,43 @@
 import mongoose, { HydratedDocument, model, models, Schema } from "mongoose";
 
+// Only trainingName, instituteName and netFeesInr are mandatory —
+// everything else is optional at creation time.
 export interface IWorkshopTraining {
   _id?: string;
   trainingName: string;
   trainingUniqueCode: string;
   trainingType: string[];
-  hsnCode: string;
+  hsnCode?: string;
   discountPercent: number;
   instituteName: string;
-  trainingDuration: string;
-  modeOfTraining: string;
+  trainingDuration?: string;
+  modeOfTraining?: string;
   startDate?: Date;
   endDate?: Date;
   registrationDeadline?: Date;
-  curriculumTopicsCovered: string;
+  curriculumTopicsCovered?: string;
   targetAudience: string[];
-  certificationProvided: string;
-  affiliationAccreditation: string;
-  feesInr: number;
+  certificationProvided?: string;
+  affiliationAccreditation?: string;
+  feesInr?: number;
   applyDiscountVoucher: boolean;
   netFeesInr: number;
   installmentEmiOption: boolean;
-  location: string;
-  maximumSeatsBatchSize: number;
-  currentAvailability: string;
-  trainerInstructorName: string;
-  trainingImage: string;
-  trainerExperience: string;
-  languageOfDelivery: string;
-  whatsIncluded: string;
-  whatsNotIncluded: string;
-  learningOutcomes: string;
+  location?: string;
+  maximumSeatsBatchSize?: number;
+  currentAvailability?: string;
+  trainerInstructorName?: string;
+  trainingImage?: string;
+  trainerExperience?: string;
+  languageOfDelivery?: string;
+  whatsIncluded?: string;
+  whatsNotIncluded?: string;
+  learningOutcomes?: string;
   courseDemoVideo?: string;
   brochurePdfDownload: string[];
-  refundCancellationPolicy: string;
-  postTrainingSupport: string;
-  contactForQueries: string;
+  refundCancellationPolicy?: string;
+  postTrainingSupport?: string;
+  contactForQueries?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -50,18 +52,9 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
       trim: true,
     },
     trainingUniqueCode: { type: String, required: true, trim: true, unique: true },
-    trainingType: {
-      type: [String],
-      required: true,
-      validate: {
-        validator: (value: string[]) =>
-          Array.isArray(value) && value.length > 0,
-        message: "Please select at least one training type",
-      },
-    },
+    trainingType: { type: [String], default: [] },
     hsnCode: {
       type: String,
-      required: true,
       trim: true,
     },
     discountPercent: {
@@ -79,32 +72,23 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
         message: "Institute name should contain only letters and spaces",
       },
     },
-    trainingDuration: { type: String, required: true, trim: true },
-    modeOfTraining: { type: String, required: true, trim: true },
-    startDate: { type: Date, required: true },
-    endDate: { type: Date, required: true },
-    registrationDeadline: { type: Date, required: true },
-    curriculumTopicsCovered: { type: String, required: true, trim: true },
-    targetAudience: {
-      type: [String],
-      required: true,
-      validate: {
-        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
-        message: "At least one target audience item is required",
-      },
-    },
+    trainingDuration: { type: String, trim: true },
+    modeOfTraining: { type: String, trim: true },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    registrationDeadline: { type: Date },
+    curriculumTopicsCovered: { type: String, trim: true },
+    targetAudience: { type: [String], default: [] },
     certificationProvided: {
       type: String,
       enum: ["Yes", "No"],
-      required: true,
     },
-    affiliationAccreditation: { type: String, required: true, trim: true },
+    affiliationAccreditation: { type: String, trim: true },
     feesInr: {
       type: Number,
-      required: true,
       min: 0,
       validate: {
-        validator: (value: number) => Number.isInteger(value),
+        validator: (value: number) => value === undefined || Number.isInteger(value),
         message: "Fees (INR) must contain digits only",
       },
     },
@@ -119,36 +103,33 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
       },
     },
     installmentEmiOption: { type: Boolean, default: false },
-    location: { type: String, required: true, trim: true },
+    location: { type: String, trim: true },
     maximumSeatsBatchSize: {
       type: Number,
-      required: true,
       min: 1,
       validate: {
-        validator: (value: number) => Number.isInteger(value),
+        validator: (value: number) => value === undefined || Number.isInteger(value),
         message: "Maximum seats / batch size must contain digits only",
       },
     },
-    currentAvailability: { type: String, required: true, trim: true },
+    currentAvailability: { type: String, trim: true },
     trainerInstructorName: {
       type: String,
-      required: true,
       trim: true,
       validate: {
-        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
+        validator: (value: string) => !value || /^[A-Za-z ]+$/.test(value),
         message: "Trainer / instructor name should contain only letters and spaces",
       },
     },
-    trainingImage: { type: String, required: true, trim: true },
-    trainerExperience: { type: String, required: true, trim: true },
+    trainingImage: { type: String, trim: true },
+    trainerExperience: { type: String, trim: true },
     languageOfDelivery: {
       type: String,
       enum: ["English", "Hindi", "Bilingual"],
-      required: true,
     },
-    whatsIncluded: { type: String, required: true, trim: true },
-    whatsNotIncluded: { type: String, required: true, trim: true },
-    learningOutcomes: { type: String, required: true, trim: true },
+    whatsIncluded: { type: String, trim: true },
+    whatsNotIncluded: { type: String, trim: true },
+    learningOutcomes: { type: String, trim: true },
     courseDemoVideo: {
       type: String,
       default: "",
@@ -167,17 +148,10 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
         message: "Course demo video must be a valid YouTube link",
       },
     },
-    brochurePdfDownload: {
-      type: [String],
-      required: true,
-      validate: {
-        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
-        message: "At least one brochure PDF is required",
-      },
-    },
-    refundCancellationPolicy: { type: String, required: true, trim: true },
-    postTrainingSupport: { type: String, required: true, trim: true },
-    contactForQueries: { type: String, required: true, trim: true },
+    brochurePdfDownload: { type: [String], default: [] },
+    refundCancellationPolicy: { type: String, trim: true },
+    postTrainingSupport: { type: String, trim: true },
+    contactForQueries: { type: String, trim: true },
   },
   { timestamps: true }
 );

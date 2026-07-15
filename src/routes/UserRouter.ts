@@ -112,8 +112,10 @@ const resolvedPatientId = await generatePatientId();
     const cleanContactNo = String(contactNo ?? "").trim();
     const cleanAddress = String(address ?? "").trim();
 
-    if (!cleanName || !cleanEmail || !cleanContactNo || !cleanAddress) {
-      return res.status(400).json({ message: "All fields are required" });
+    // Only name and contact number are mandatory — email and address are
+    // optional.
+    if (!cleanName || !cleanContactNo) {
+      return res.status(400).json({ message: "Name and contact number are required" });
     }
 
     if (!nameRegex.test(cleanName)) {
@@ -122,7 +124,7 @@ const resolvedPatientId = await generatePatientId();
         .json({ message: "Patient name should contain only letters and spaces" });
     }
 
-    if (!emailRegex.test(cleanEmail)) {
+    if (cleanEmail && !emailRegex.test(cleanEmail)) {
       return res.status(400).json({ message: "Enter a valid email address" });
     }
 
@@ -132,12 +134,12 @@ const resolvedPatientId = await generatePatientId();
         .json({ message: "Contact No. must contain exactly 10 digits" });
     }
 
-  const exists = await User.findOne({
-  $or: [
-    { email: cleanEmail },
-    { contactNo: cleanContactNo }
-  ]
-});
+  const duplicateConditions: Record<string, unknown>[] = [
+    { contactNo: cleanContactNo },
+  ];
+  if (cleanEmail) duplicateConditions.push({ email: cleanEmail });
+
+  const exists = await User.findOne({ $or: duplicateConditions });
     if (exists) {
       return res.status(400).json({ message: "User with same email, contact number or ID already exists" });
     }
@@ -145,9 +147,9 @@ const resolvedPatientId = await generatePatientId();
     const user = await User.create({
       patientId: resolvedPatientId,
       name: cleanName,
-      email: cleanEmail,
       contactNo: cleanContactNo,
       address: cleanAddress,
+      ...(cleanEmail ? { email: cleanEmail } : {}),
       profileImage: uploadedProfileImage || "",
     });
 

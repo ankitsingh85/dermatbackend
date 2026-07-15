@@ -1,44 +1,46 @@
 import mongoose, { HydratedDocument, model, models, Schema } from "mongoose";
 
+// Only courseName, instituteName and netFeesInr are mandatory — everything
+// else is optional at creation time.
 export interface ICourse {
   _id?: string;
   courseName: string;
   courseUniqueCode: string;
   courseType: string[];
   instituteName: string;
-  courseDuration: string;
-  modeOfTraining: string;
+  courseDuration?: string;
+  modeOfTraining?: string;
   startDate?: Date;
   endDate?: Date;
   registrationDeadline?: Date;
-  curriculumTopicsCovered: string;
+  curriculumTopicsCovered?: string;
   targetAudience: string[];
-  certificationProvided: string;
-  affiliationAccreditation: string;
-  feesInr: number;
+  certificationProvided?: string;
+  affiliationAccreditation?: string;
+  feesInr?: number;
   applyDiscountVoucher: boolean;
   netFeesInr: number;
   discountsOffers: string;
-  location: string;
+  location?: string;
 
-  hsnCode: string;
+  hsnCode?: string;
   discountPercent: number;
   maximumSeatsBatchSize?: number;
-  currentAvailability: string;
-  trainerInstructorName: string;
+  currentAvailability?: string;
+  trainerInstructorName?: string;
   trainerImage?: string;
-  trainerExperience: string;
-  languageOfDelivery: string;
-  whatsIncluded: string;
-  whatsNotIncluded: string;
-  learningOutcomes: string;
+  trainerExperience?: string;
+  languageOfDelivery?: string;
+  whatsIncluded?: string;
+  whatsNotIncluded?: string;
+  learningOutcomes?: string;
   courseImage?: string;
   courseDemoVideo?: string;
   brochurePdfDownload: string[];
-  refundCancellationPolicy: string;
-  postCourseSupport: string;
-  mobileNo: string;
-  contactForQueries: string;
+  refundCancellationPolicy?: string;
+  postCourseSupport?: string;
+  mobileNo?: string;
+  contactForQueries?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -55,7 +57,6 @@ const CourseSchema = new Schema<CourseDocument>(
 
     hsnCode: {
       type: String,
-      required: true,
       trim: true,
     },
 
@@ -70,41 +71,24 @@ const CourseSchema = new Schema<CourseDocument>(
       unique: true,
       trim: true,
     },
-    courseType: {
-      type: [String],
-      required: true,
-      validate: {
-        validator: (value: string[]) =>
-          Array.isArray(value) && value.length > 0,
-        message: "Please select at least one course type",
-      },
-    },
-    courseDuration: { type: String, required: true, trim: true },
-    modeOfTraining: { type: String, required: true, trim: true },
-    startDate: { type: Date, required: true },
-    endDate: { type: Date, required: true },
-    registrationDeadline: { type: Date, required: true },
-    curriculumTopicsCovered: { type: String, required: true, trim: true },
-    targetAudience: {
-      type: [String],
-      required: true,
-      validate: {
-        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
-        message: "At least one target audience item is required",
-      },
-    },
+    courseType: { type: [String], default: [] },
+    courseDuration: { type: String, trim: true },
+    modeOfTraining: { type: String, trim: true },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    registrationDeadline: { type: Date },
+    curriculumTopicsCovered: { type: String, trim: true },
+    targetAudience: { type: [String], default: [] },
     certificationProvided: {
       type: String,
       enum: ["Yes", "No"],
-      required: true,
     },
-    affiliationAccreditation: { type: String, required: true, trim: true },
+    affiliationAccreditation: { type: String, trim: true },
     feesInr: {
       type: Number,
-      required: true,
       min: 0,
       validate: {
-        validator: (value: number) => Number.isInteger(value),
+        validator: (value: number) => value === undefined || Number.isInteger(value),
         message: "Fees (INR) must contain digits only",
       },
     },
@@ -119,43 +103,40 @@ const CourseSchema = new Schema<CourseDocument>(
       },
     },
     discountsOffers: { type: String, default: "" },
-    location: { type: String, required: true, trim: true },
+    location: { type: String, trim: true },
     maximumSeatsBatchSize: {
       type: Number,
-      required: true,
       min: 1,
       validate: {
-        validator: (value: number) => Number.isInteger(value),
+        validator: (value: number) => value === undefined || Number.isInteger(value),
         message: "Maximum seats / batch size must contain digits only",
       },
     },
-    currentAvailability: { type: String, required: true, trim: true },
+    currentAvailability: { type: String, trim: true },
     trainerInstructorName: {
       type: String,
-      required: true,
       trim: true,
       validate: {
-        validator: (value: string) => /^[A-Za-z ]+$/.test(value),
+        validator: (value: string) => !value || /^[A-Za-z ]+$/.test(value),
         message: "Trainer / instructor name should contain only letters and spaces",
       },
     },
-    trainerImage: { type: String, required: true, trim: true },
-    trainerExperience: { type: String, required: true, trim: true },
+    trainerImage: { type: String, trim: true },
+    trainerExperience: { type: String, trim: true },
     languageOfDelivery: {
       type: String,
       enum: ["English", "Hindi", "Bilingual"],
-      required: true,
     },
-    whatsIncluded: { type: String, required: true, trim: true },
-    whatsNotIncluded: { type: String, required: true, trim: true },
-    learningOutcomes: { type: String, required: true, trim: true },
-    courseImage: { type: String, required: true, trim: true },
+    whatsIncluded: { type: String, trim: true },
+    whatsNotIncluded: { type: String, trim: true },
+    learningOutcomes: { type: String, trim: true },
+    courseImage: { type: String, trim: true },
     courseDemoVideo: {
       type: String,
-      required: true,
       trim: true,
       validate: {
         validator: (value: string) => {
+          if (!value) return true;
           try {
             const url = new URL(value);
             const host = url.hostname.toLowerCase();
@@ -167,26 +148,18 @@ const CourseSchema = new Schema<CourseDocument>(
         message: "Course demo video must be a valid YouTube link",
       },
     },
-    brochurePdfDownload: {
-      type: [String],
-      required: true,
-      validate: {
-        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
-        message: "At least one brochure PDF is required",
-      },
-    },
-    refundCancellationPolicy: { type: String, required: true, trim: true },
-    postCourseSupport: { type: String, required: true, trim: true },
+    brochurePdfDownload: { type: [String], default: [] },
+    refundCancellationPolicy: { type: String, trim: true },
+    postCourseSupport: { type: String, trim: true },
     mobileNo: {
       type: String,
-      required: true,
       trim: true,
       validate: {
-        validator: (value: string) => /^\d{10}$/.test(value),
+        validator: (value: string) => !value || /^\d{10}$/.test(value),
         message: "Mobile number must be exactly 10 digits",
       },
     },
-    contactForQueries: { type: String, required: true, trim: true },
+    contactForQueries: { type: String, trim: true },
   },
   { timestamps: true }
 );

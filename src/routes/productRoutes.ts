@@ -144,12 +144,20 @@ const normalizeNumericFields =
 ].forEach(field=>{
 
 
-if(payload[field] !== undefined){
+if(payload[field] === undefined) return;
+
+// Blank optional numeric field — drop it so it's treated as "not
+// provided" instead of coercing "" to 0.
+if(payload[field] === "" || payload[field] === null){
+
+delete payload[field];
+
+return;
+
+}
 
 payload[field] =
 Number(payload[field]);
-
-}
 
 
 });
@@ -349,36 +357,12 @@ message:"At least one category required"
 
 
 
+/* Only productName, category and discountedPrice are mandatory — every
+   other field is optional and, if provided, is still format-checked
+   below (but never required). */
 const requiredFields = [
 
-"productName",
-
-"brandName",
-
-"description",
-
-"ingredients",
-
-"targetConcerns",
-
-"usageInstructions",
-
-"expiryDate",
-"manufacturerName",
-
-"licenseNumber",
-
-"hsnCode",
-
-"packagingType",
-
-"skinHairType",
-
-"barcode",
-
-"netQuantity",
-
-"quantityUnit"
+"productName"
 
 ];
 
@@ -403,6 +387,34 @@ message:
 
 }
 
+
+}
+
+
+/* DISCOUNTED PRICE CHECK */
+
+if(
+isCreate &&
+(
+payload.discountedPrice === undefined ||
+payload.discountedPrice === null
+)
+){
+
+return {
+message:`${friendlyFieldNames.discountedPrice} is required`
+};
+
+}
+
+if(
+payload.discountedPrice !== undefined &&
+Number.isNaN(Number(payload.discountedPrice))
+){
+
+return {
+message:`${friendlyFieldNames.discountedPrice} must be a valid number`
+};
 
 }
 
@@ -487,29 +499,6 @@ message:
 
 
 
-
-
-
-/* IMAGE REQUIRED */
-
-
-if(
-isCreate &&
-(
-!payload.productImages ||
-!Array.isArray(payload.productImages) ||
-!payload.productImages.length
-)
-){
-
-return {
-
-message:
-"At least one product image required"
-
-};
-
-}
 
 
 

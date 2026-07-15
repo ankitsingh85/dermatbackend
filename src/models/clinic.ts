@@ -30,16 +30,16 @@ export interface IClinic extends Document {
   video?: string;
   certifications?: string[];
   doctors: IDoctor[];
-  address: string;
+  address?: string;
   addresses?: ClinicAddress[];
   city?: string;
   services?: string;
   sector?: string;
   pincode?: string;
   mapLink?: string;
-  contactNumber?: string;
+  contactNumber: string;
   whatsapp?: string;
-  email: string;
+  email?: string;
   workingHours?: IClinicWorkingHours;
   licenseNo?: string;
   experience?: string;
@@ -57,6 +57,13 @@ export interface IClinic extends Document {
   isActive?: boolean;
     latitude?: number;
   longitude?: number;
+
+  // Admin approval gate for self-registered clinics. New signups start
+  // "pending" and can't log in until an admin approves them; rejected
+  // clinics are told why (rejectionReason) and can't log in either.
+  approvalStatus?: "pending" | "approved" | "rejected";
+  rejectionReason?: string;
+  approvedAt?: Date;
 }
 
 const DoctorSchema = new Schema<IDoctor>(
@@ -130,7 +137,7 @@ const ClinicSchema = new Schema<IClinic>(
 
     doctors: [DoctorSchema],
 
-    address: { type: String, required: true },
+    address: { type: String },
     addresses: { type: [ClinicAddressSchema], default: [] },
     city: String,
     services: String,
@@ -138,9 +145,13 @@ const ClinicSchema = new Schema<IClinic>(
     pincode: String,
     mapLink: String,
 
-    contactNumber: { type: String, trim: true },
-    whatsapp: String,
-    email: { type: String, required: true },
+    // contactNumber and whatsapp are required by the admin "Create Clinic"
+    // form/route, but not enforced here at the schema level — clinic
+    // self-registration (ClinicAuthController) treats WhatsApp as
+    // optional, and both flows share this model.
+    contactNumber: { type: String, required: true, trim: true },
+    whatsapp: { type: String, trim: true },
+    email: { type: String },
 
     workingHours: { type: ClinicWorkingHoursSchema, default: () => ({}) },
 
@@ -164,6 +175,14 @@ const ClinicSchema = new Schema<IClinic>(
     clinicStatus: { type: String, default: "Open" },
     verifiedBadge: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    rejectionReason: { type: String, default: "" },
+    approvedAt: { type: Date },
   },
   { timestamps: true }
 );

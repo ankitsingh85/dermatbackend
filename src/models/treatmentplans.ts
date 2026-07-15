@@ -39,7 +39,7 @@ export interface ITreatmentPlan extends Document {
 
   mrp?: number;
 
-  offerPrice?: number;
+  offerPrice: number;
 
   pricePerSession?: number;
 
@@ -135,6 +135,8 @@ const TreatmentPlanSchema = new Schema<ITreatmentPlan>(
     serviceCategory: {
       type: [String],
 
+      required: true,
+
       default: [],
     },
 
@@ -145,7 +147,10 @@ const TreatmentPlanSchema = new Schema<ITreatmentPlan>(
 
     mrp: Number,
 
-    offerPrice: Number,
+    offerPrice: {
+      type: Number,
+      required: true,
+    },
 
     pricePerSession: Number,
 

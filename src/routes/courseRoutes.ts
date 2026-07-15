@@ -194,6 +194,22 @@ const normalizePayload = (
     }
   });
 
+  // Optional fields with a schema-level enum/format validator would throw
+  // on an empty string instead of being left unset. Blank input on these
+  // now just means "not provided".
+  const dropIfBlank = [
+    "certificationProvided",
+    "languageOfDelivery",
+    "trainerInstructorName",
+    "mobileNo",
+    "courseDemoVideo",
+  ];
+  dropIfBlank.forEach((field) => {
+    if (typeof payload[field] === "string" && !payload[field]) {
+      delete payload[field];
+    }
+  });
+
   /* ================= COURSE TYPE FIX ================= */
   if (payload.courseType !== undefined) {
     const types = parseStringArray(payload.courseType);
@@ -267,53 +283,30 @@ const normalizePayload = (
   return payload;
 };
 
+// Only courseName, instituteName and netFeesInr are mandatory to create a
+// course — everything else is optional and, if provided, is still
+// format-checked below (but never required).
 const validateCoursePayload = (
   payload: Record<string, unknown>,
   isCreate = false,
 ) => {
-  const requiredTextFields = [
-    "courseName",
-    "courseType",
-    "hsnCode",
-    "instituteName",
-    "courseDuration",
-    "modeOfTraining",
-    "startDate",
-    "endDate",
-    "registrationDeadline",
-    "curriculumTopicsCovered",
-    "certificationProvided",
-    "affiliationAccreditation",
-    "location",
-    "currentAvailability",
-    "trainerInstructorName",
-    "trainerExperience",
-    "languageOfDelivery",
-    "whatsIncluded",
-    "whatsNotIncluded",
-    "learningOutcomes",
-    "refundCancellationPolicy",
-    "postCourseSupport",
-    "mobileNo",
-    "contactForQueries",
-  ] as const;
+  const requiredTextFields = ["courseName", "instituteName"] as const;
 
   for (const field of requiredTextFields) {
-    if (field === "courseType") {
-      if (
-        isCreate &&
-        (!Array.isArray(payload.courseType) || payload.courseType.length === 0)
-      ) {
-        return { message: "Please select at least one course type" };
-      }
-      continue;
-    }
-
     if (isCreate && !stripHtml(payload[field])) {
       return {
         message: `${String(field).replace(/([A-Z])/g, " $1")} is required`,
       };
     }
+  }
+
+  if (
+    isCreate &&
+    (payload.netFeesInr === undefined ||
+      payload.netFeesInr === null ||
+      payload.netFeesInr === "")
+  ) {
+    return { message: "Net fees inr is required" };
   }
 
   for (const field of dateFields) {
@@ -341,35 +334,23 @@ const validateCoursePayload = (
     };
   }
 
-  const requiredNumberFields = [
+  const numberFieldsIfProvided = [
     "feesInr",
     "netFeesInr",
     "discountPercent",
     "maximumSeatsBatchSize",
   ] as const;
 
-  for (const field of requiredNumberFields) {
-    if (
-      isCreate &&
-      (payload[field] === undefined ||
-        payload[field] === null ||
-        payload[field] === "")
-    ) {
-      return {
-        message: `${String(field).replace(/([A-Z])/g, " $1")} is required`,
-      };
-    }
+  for (const field of numberFieldsIfProvided) {
+    if (payload[field] === undefined) continue;
 
-    if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
+    if (Number.isNaN(Number(payload[field]))) {
       return {
         message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid number`,
       };
     }
 
-    if (
-      payload[field] !== undefined &&
-      !Number.isInteger(Number(payload[field]))
-    ) {
+    if (!Number.isInteger(Number(payload[field]))) {
       return {
         message: `${String(field).replace(/([A-Z])/g, " $1")} must contain digits only`,
       };
@@ -377,7 +358,6 @@ const validateCoursePayload = (
 
     if (
       field === "discountPercent" &&
-      payload[field] !== undefined &&
       (Number(payload[field]) < 0 || Number(payload[field]) > 100)
     ) {
       return { message: "Discount % must be between 0 and 100" };
@@ -393,7 +373,6 @@ const validateCoursePayload = (
 
   if (
     payload.mobileNo !== undefined &&
-    String(payload.mobileNo).trim() &&
     String(payload.mobileNo).trim().length !== 10
   ) {
     return { message: "Mobile number must be exactly 10 digits" };
@@ -407,45 +386,10 @@ const validateCoursePayload = (
   }
 
   if (
-    isCreate &&
-    (!payload.courseImage ||
-      typeof payload.courseImage !== "string" ||
-      !String(payload.courseImage).trim())
-  ) {
-    return { message: "Course image is required" };
-  }
-
-  if (
-    isCreate &&
-    (!payload.trainerImage ||
-      typeof payload.trainerImage !== "string" ||
-      !String(payload.trainerImage).trim())
-  ) {
-    return { message: "Trainer image is required" };
-  }
-
-  if (
-    isCreate &&
-    (!payload.brochurePdfDownload ||
-      !Array.isArray(payload.brochurePdfDownload) ||
-      !payload.brochurePdfDownload.length)
-  ) {
-    return { message: "At least one brochure PDF is required" };
-  }
-
-  if (
     payload.targetAudience !== undefined &&
     !Array.isArray(payload.targetAudience)
   ) {
     return { message: "Target audience must be a valid list" };
-  }
-
-  if (
-    isCreate &&
-    Array.isArray(payload.targetAudience) &&
-    payload.targetAudience.length === 0
-  ) {
-    return { message: "At least one target audience item is required" };
   }
 
   return null;

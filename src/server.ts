@@ -6,6 +6,8 @@ import mongoose from "mongoose";
 import path from "path";
 import http from "http";
 import { Server } from "socket.io";
+import Clinic from "./models/clinic";
+import User from "./models/user";
 
 // Routes
 import authRoutes from "./routes/AuthRouter";
@@ -121,7 +123,48 @@ app.use("/api/product-reviews", productReviewRoutes);
 // -------------------- DB --------------------
 mongoose
   .connect(process.env.MONGO_URI as string)
-  .then(() => console.log("✅ MongoDB connected"))
+  .then(async () => {
+    console.log("✅ MongoDB connected");
+
+    // One-time backfill: clinics created before the approval-workflow
+    // field existed have no `approvalStatus` in the DB. Without this,
+    // Mongoose's schema default ("pending") would apply to them on
+    // next read and lock out every already-active clinic. Mark any
+    // clinic that predates this field as already approved.
+    try {
+      const backfilled = await Clinic.updateMany(
+        { approvalStatus: { $exists: false } },
+        { $set: { approvalStatus: "approved" } }
+      );
+      if (backfilled.modifiedCount) {
+        console.log(
+          `✅ Backfilled approvalStatus="approved" for ${backfilled.modifiedCount} pre-existing clinic(s)`
+        );
+      }
+    } catch (migrationErr) {
+      console.error("⚠️ Clinic approvalStatus backfill failed:", migrationErr);
+    }
+
+    // One-time repair: the old `email` unique index on User was NOT
+    // sparse, so once email became optional, a second user with no
+    // email would fail to save (a non-sparse unique index treats every
+    // missing value as the same "null" and rejects the duplicate).
+    // Drop the old index and let Mongoose rebuild it from the schema
+    // (unique + sparse) so multiple emailless users can coexist.
+    try {
+      const existingIndexes = await User.collection.indexes();
+      const staleEmailIndex = existingIndexes.find(
+        (index) => index.key?.email === 1 && !index.sparse
+      );
+      if (staleEmailIndex?.name) {
+        await User.collection.dropIndex(staleEmailIndex.name);
+        console.log("✅ Dropped stale non-sparse email index on User");
+      }
+      await User.syncIndexes();
+    } catch (migrationErr) {
+      console.error("⚠️ User email index repair failed:", migrationErr);
+    }
+  })
   .catch((err) => console.error("❌ MongoDB error:", err));
 
 // ================= SOCKET =================

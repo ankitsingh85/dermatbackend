@@ -58,7 +58,7 @@ export interface IUserTestReportItem {
 export interface IUser extends Document {
     patientId: string;
     name: string;
-    email: string;
+    email?: string;
     contactNo: string;
     address?: string;
   addresses?: IUserAddress[];
@@ -84,14 +84,18 @@ const UserSchema = new Schema<IUser>(
         message: "Patient name should contain only letters and spaces",
       },
     },
+    // Optional — but still unique when provided. "sparse" keeps the
+    // unique index from colliding on multiple users that all skip email
+    // (a non-sparse unique index would treat every missing value as the
+    // same "null" and reject the second one).
     email: {
       type: String,
-      required: true,
       unique: true,
+      sparse: true,
       lowercase: true,
       trim: true,
       validate: {
-        validator: (value: string) => emailRegex.test(value),
+        validator: (value: string) => !value || emailRegex.test(value),
         message: "Enter a valid email address",
       },
     },

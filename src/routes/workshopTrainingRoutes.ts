@@ -163,6 +163,16 @@ const normalizePayload = (
     }
   });
 
+  // Optional fields with a schema-level enum/format validator would throw
+  // on an empty string instead of being left unset. Blank input on these
+  // now just means "not provided".
+  const dropIfBlank = ["certificationProvided", "languageOfDelivery", "trainerInstructorName"];
+  dropIfBlank.forEach((field) => {
+    if (typeof payload[field] === "string" && !payload[field]) {
+      delete payload[field];
+    }
+  });
+
   if (payload.applyDiscountVoucher !== undefined) {
     payload.applyDiscountVoucher = parseBoolean(
       payload.applyDiscountVoucher,
@@ -228,35 +238,14 @@ const normalizePayload = (
   return payload;
 };
 
+// Only trainingName, instituteName and netFeesInr are mandatory to
+// create a workshop training — everything else is optional and, if
+// provided, is still format-checked below (but never required).
 const validatePayload = (
   payload: Record<string, unknown>,
   isCreate = false,
 ) => {
-  const requiredTextFields = [
-    "trainingName",
-    "trainingUniqueCode",
-    "hsnCode",
-    "instituteName",
-    "trainingDuration",
-    "modeOfTraining",
-    "startDate",
-    "endDate",
-    "registrationDeadline",
-    "curriculumTopicsCovered",
-    "certificationProvided",
-    "affiliationAccreditation",
-    "location",
-    "currentAvailability",
-    "trainerInstructorName",
-    "trainerExperience",
-    "languageOfDelivery",
-    "whatsIncluded",
-    "whatsNotIncluded",
-    "learningOutcomes",
-    "refundCancellationPolicy",
-    "postTrainingSupport",
-    "contactForQueries",
-  ] as const;
+  const requiredTextFields = ["trainingName", "trainingUniqueCode", "instituteName"] as const;
 
   const labelMap: Record<string, string> = {
     trainingName: "Training name",
@@ -298,9 +287,11 @@ const validatePayload = (
 
   if (
     isCreate &&
-    (!Array.isArray(payload.trainingType) || payload.trainingType.length === 0)
+    (payload.netFeesInr === undefined ||
+      payload.netFeesInr === null ||
+      payload.netFeesInr === "")
   ) {
-    return { message: "Please select at least one training type" };
+    return { message: `${labelMap.netFeesInr} is required` };
   }
 
   for (const field of [
@@ -330,31 +321,25 @@ const validatePayload = (
     };
   }
 
-  const requiredNumberFields = [
+  const numberFieldsIfProvided = [
     "feesInr",
     "netFeesInr",
     "discountPercent",
     "maximumSeatsBatchSize",
   ] as const;
 
-  for (const field of requiredNumberFields) {
-    if (isCreate && payload[field] === undefined) {
-      return { message: `${labelMap[field] || field} is required` };
-    }
-    if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
+  for (const field of numberFieldsIfProvided) {
+    if (payload[field] === undefined) continue;
+    if (Number.isNaN(Number(payload[field]))) {
       return { message: `${labelMap[field] || field} must be a valid number` };
     }
-    if (
-      payload[field] !== undefined &&
-      !Number.isInteger(Number(payload[field]))
-    ) {
+    if (!Number.isInteger(Number(payload[field]))) {
       return {
         message: `${labelMap[field] || field} must contain digits only`,
       };
     }
     if (
       field === "discountPercent" &&
-      payload[field] !== undefined &&
       (Number(payload[field]) < 0 || Number(payload[field]) > 100)
     ) {
       return { message: "Discount % must be between 0 and 100" };
@@ -366,14 +351,6 @@ const validatePayload = (
     !Array.isArray(payload.targetAudience)
   ) {
     return { message: "Target audience must be a valid list" };
-  }
-
-  if (
-    isCreate &&
-    Array.isArray(payload.targetAudience) &&
-    payload.targetAudience.length === 0
-  ) {
-    return { message: "At least one target audience item is required" };
   }
 
   if (
@@ -390,24 +367,6 @@ const validatePayload = (
     })()
   ) {
     return { message: "Course demo video must be a valid YouTube link" };
-  }
-
-  if (
-    isCreate &&
-    (!payload.trainingImage ||
-      typeof payload.trainingImage !== "string" ||
-      !String(payload.trainingImage).trim())
-  ) {
-    return { message: "Training image is required" };
-  }
-
-  if (
-    isCreate &&
-    (!payload.brochurePdfDownload ||
-      !Array.isArray(payload.brochurePdfDownload) ||
-      !payload.brochurePdfDownload.length)
-  ) {
-    return { message: "At least one brochure PDF is required" };
   }
 
   if (

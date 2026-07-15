@@ -236,7 +236,11 @@ const ProductSchema = new Schema<ProductDocument>(
 
     mrpPrice: Number,
 
-    discountedPrice: Number,
+    discountedPrice: {
+      type: Number,
+
+      required: true,
+    },
 
     discountPercent: Number,
 

@@ -241,6 +241,8 @@ router.put("/:id", async (req, res) => {
     const { name, email, phone, role, accessLevel, customRoleLabel, permissions, password } =
       req.body;
 
+    const previousRole = admin.role;
+
     if (name) {
       admin.name = name.trim();
 
@@ -279,6 +281,12 @@ router.put("/:id", async (req, res) => {
       if (admin.role !== "superadmin") {
         admin.permissions = normalizePermissions(permissions);
       }
+    } else if (previousRole === "superadmin" && admin.role !== "superadmin") {
+      // Demoted away from Super Admin without an explicit permissions
+      // payload — don't silently leave the old full-access grant in
+      // place. Reset to no access and require the caller to explicitly
+      // re-grant module permissions for the new role.
+      admin.permissions = normalizePermissions([]);
     }
 
     if (password) {

@@ -68,8 +68,33 @@ const normalizeNumericFields = (payload: Record<string, unknown>) => {
   ] as const;
 
   for (const field of fields) {
-    if (payload[field] !== undefined && payload[field] !== "") {
-      payload[field] = Number(payload[field]);
+    if (payload[field] === undefined) continue;
+    if (payload[field] === "") {
+      // Optional numeric field left blank — drop it so Mongoose leaves
+      // the path unset instead of throwing a cast error on "".
+      delete payload[field];
+      continue;
+    }
+    payload[field] = Number(payload[field]);
+  }
+};
+
+// Optional fields whose schema type would throw a Mongoose cast error
+// (Date/format validators) if handed an empty string instead of being
+// left unset. Blank input on these now just means "not provided".
+const OPTIONAL_FIELDS_TO_DROP_WHEN_BLANK = [
+  "hsnCode",
+  "brandName",
+  "manufacturerName",
+  "licenseNumber",
+  "productVideoUrl",
+  "expiryDate",
+] as const;
+
+const dropBlankOptionalFields = (payload: Record<string, unknown>) => {
+  for (const field of OPTIONAL_FIELDS_TO_DROP_WHEN_BLANK) {
+    if (typeof payload[field] === "string" && !payload[field]) {
+      delete payload[field];
     }
   }
 };
@@ -87,6 +112,7 @@ const normalizeBooleanFields = (payload: Record<string, unknown>) => {
 const normalizeB2BPayload = (body: Record<string, unknown>) => {
   const payload: Record<string, unknown> = { ...body };
   normalizeNumericFields(payload);
+  dropBlankOptionalFields(payload);
   normalizeBooleanFields(payload);
 
   const promotionalTags = parseJsonArray(payload.promotionalTags);
@@ -128,30 +154,15 @@ const friendlyFieldNames: Record<string, string> = {
   gst: "GST %",
 };
 
+// Only productName, category and discountedPrice are mandatory to create
+// a B2B product — everything else is optional and, if provided, is still
+// format-checked below (but never required).
 const validateB2BPayload = (
   payload: Record<string, unknown>,
   isCreate = false
 ) => {
-  const requiredTextFields = [
-    "productName",
-    "hsnCode",
-    "brandName",
-    "packSize",
-    "expiryDate",
-    "shelfLife",
-    "description",
-    "ingredients",
-    "usageInstructions",
-    "treatmentIndications",
-    "manufacturerName",
-    "licenseNumber",
-    "productVideoUrl",
-  ] as const;
-
-  for (const field of requiredTextFields) {
-    if (isCreate && !stripHtml(payload[field])) {
-      return { message: `${friendlyFieldNames[field]} is required` };
-    }
+  if (isCreate && !stripHtml(payload.productName)) {
+    return { message: `${friendlyFieldNames.productName} is required` };
   }
 
   if (
@@ -161,6 +172,15 @@ const validateB2BPayload = (
       !payload.category.length)
   ) {
     return { message: "At least one category is required" };
+  }
+
+  if (
+    isCreate &&
+    (payload.discountedPrice === undefined ||
+      payload.discountedPrice === null ||
+      payload.discountedPrice === "")
+  ) {
+    return { message: `${friendlyFieldNames.discountedPrice} is required` };
   }
 
   if (
@@ -191,13 +211,7 @@ const validateB2BPayload = (
     return { message: "HSN code must contain digits only" };
   }
 
-  // packSize no longer restricted to digits — numbers, symbols, and text
-  // are all accepted (e.g. "10x5 ml", "Box of 24", "500g x 10").
-  if (isCreate && !stripHtml(payload.packSize)) {
-    return { message: "Pack size is required" };
-  }
-
-  const requiredNumericFields = [
+  const numericFieldsIfProvided = [
     "pricePerUnit",
     "bulkPriceTier",
     "moq",
@@ -206,10 +220,7 @@ const validateB2BPayload = (
     "discountedPrice",
   ] as const;
 
-  for (const field of requiredNumericFields) {
-    if (isCreate && (payload[field] === undefined || payload[field] === null || payload[field] === "")) {
-      return { message: `${friendlyFieldNames[field]} is required` };
-    }
+  for (const field of numericFieldsIfProvided) {
     if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
       return { message: `${friendlyFieldNames[field]} must be a valid number` };
     }
@@ -230,24 +241,14 @@ const validateB2BPayload = (
     return { message: "Product video URL must be a valid URL" };
   }
 
-  if (
-    isCreate &&
-    (!payload.productImages ||
-      !Array.isArray(payload.productImages) ||
-      !payload.productImages.length)
-  ) {
-    return { message: "At least one product image is required" };
-  }
-
-  // GST is now a free-form percentage (0-100) instead of a fixed enum,
-  // to support the dropdown-presets + "Custom" text field on the frontend.
+  // GST is a free-form percentage (0-100) instead of a fixed enum, to
+  // support the dropdown-presets + "Custom" text field on the frontend.
+  // It's optional — the schema defaults to 5 when omitted.
   if (payload.gst !== undefined) {
     const gstValue = Number(payload.gst);
     if (Number.isNaN(gstValue) || gstValue < 0 || gstValue > 100) {
       return { message: "GST % must be a valid number between 0 and 100" };
     }
-  } else if (isCreate) {
-    return { message: "GST % is required" };
   }
 
   return null;
