@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import Order from "../models/order";
+import { userAuth, UserAuthRequest } from "../middleware/authUser";
 // import UserProfile from "../models/userinformation";
 
 const router = express.Router();
@@ -73,6 +74,39 @@ const matchesOrderType = (order: any, requestedType?: string) => {
     (hasItemType(order, "product") || orderType === "product")
   );
 };
+
+/** ✅ USER: Get the authenticated user's paid, successful consultation service IDs.
+ * Auth is verified server-side from the JWT (req.user.id) — never trust a
+ * client-supplied user id for this, since it gates access to a paid doctor's
+ * video call. */
+router.get("/my/consultation-access", userAuth, async (req: UserAuthRequest, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(401).json({ message: "Invalid or missing user" });
+    }
+
+    const orders = await Order.find({
+      userId,
+      orderType: "consultation",
+      paymentStatus: "success",
+    });
+
+    const serviceIds = new Set<string>();
+    orders.forEach((order: any) => {
+      (order.products || []).forEach((product: any) => {
+        if (String(product?.itemType || "").toLowerCase() === "consultation" && product?.id) {
+          serviceIds.add(String(product.id));
+        }
+      });
+    });
+
+    return res.status(200).json({ serviceIds: Array.from(serviceIds) });
+  } catch (err: any) {
+    console.error("❌ Error fetching consultation access:", err.message);
+    return res.status(500).json({ message: "Failed to fetch consultation access", error: err.message });
+  }
+});
 
 /** ✅ Create new order */
 router.post("/", async (req, res) => {

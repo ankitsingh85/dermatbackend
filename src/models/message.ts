@@ -22,6 +22,12 @@ const messageSchema = new mongoose.Schema(
       type: String,
       enum: ["started", "missed", "ended"],
     },
+    attachmentUrl: { type: String },
+    attachmentType: {
+      type: String,
+      enum: ["image", "pdf"],
+    },
+    attachmentName: { type: String },
     seen: { type: Boolean, default: false },
   },
   { timestamps: true }

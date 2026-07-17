@@ -202,6 +202,11 @@ io.on("connection", (socket) => {
 
   socket.on("register", (userId: string) => {
     users.set(userId, socket.id);
+    io.emit("presence_online", { id: userId });
+  });
+
+  socket.on("check_online", (id: string, callback: (online: boolean) => void) => {
+    if (typeof callback === "function") callback(users.has(id));
   });
 
   socket.on("send_message", (data) => {
@@ -317,8 +322,11 @@ io.on("connection", (socket) => {
   socket.on("call:ended", (data) => relayCallSignal("call:ended", data));
 
   socket.on("disconnect", () => {
-    for (let [key, value] of users.entries()) {
-      if (value === socket.id) users.delete(key);
+    for (const [key, value] of users.entries()) {
+      if (value === socket.id) {
+        users.delete(key);
+        io.emit("presence_offline", { id: key });
+      }
     }
   });
 });
