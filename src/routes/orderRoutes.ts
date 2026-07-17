@@ -7,10 +7,12 @@ const router = express.Router();
 
 const normalizeOrderType = (value: unknown) => {
   const next = String(value || "").toLowerCase();
-  return next === "treatment" ? "treatment" : "product";
+  if (next === "treatment") return "treatment";
+  if (next === "consultation") return "consultation";
+  return "product";
 };
 
-const hasItemType = (order: any, itemType: "product" | "treatment") => {
+const hasItemType = (order: any, itemType: "product" | "treatment" | "consultation") => {
   const products = Array.isArray(order?.products) ? order.products : [];
   return products.some(
     (item: any) => String(item?.itemType || "").toLowerCase() === itemType
@@ -36,6 +38,21 @@ const isLegacyTreatmentOrder = (order: any) => {
   );
 };
 
+const isTreatmentLike = (order: any) => {
+  const orderType = normalizeOrderType(order?.orderType);
+  return (
+    orderType === "treatment" ||
+    hasItemType(order, "treatment") ||
+    hasTreatmentName(order) ||
+    isLegacyTreatmentOrder(order)
+  );
+};
+
+const isConsultationLike = (order: any) => {
+  const orderType = normalizeOrderType(order?.orderType);
+  return orderType === "consultation" || hasItemType(order, "consultation");
+};
+
 const matchesOrderType = (order: any, requestedType?: string) => {
   if (!requestedType) return true;
 
@@ -43,21 +60,16 @@ const matchesOrderType = (order: any, requestedType?: string) => {
   const orderType = normalizeOrderType(order?.orderType);
 
   if (normalized === "treatment") {
-    return (
-      orderType === "treatment" ||
-      hasItemType(order, "treatment") ||
-      hasTreatmentName(order) ||
-      isLegacyTreatmentOrder(order)
-    );
+    return isTreatmentLike(order);
+  }
+
+  if (normalized === "consultation") {
+    return isConsultationLike(order);
   }
 
   return (
-    !(
-      orderType === "treatment" ||
-      hasItemType(order, "treatment") ||
-      hasTreatmentName(order) ||
-      isLegacyTreatmentOrder(order)
-    ) &&
+    !isTreatmentLike(order) &&
+    !isConsultationLike(order) &&
     (hasItemType(order, "product") || orderType === "product")
   );
 };

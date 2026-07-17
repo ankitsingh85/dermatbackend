@@ -4,14 +4,14 @@ export interface IOrder extends Document {
   userId?: mongoose.Types.ObjectId;
   clinicId?: mongoose.Types.ObjectId;
   ownerType?: "user" | "clinic";
-  orderType: "product" | "treatment";
+  orderType: "product" | "treatment" | "consultation";
   products: {
     id: string;
     name: string;
     quantity: number;
     price: number;
     image?: string;
-    itemType?: "product" | "treatment";
+    itemType?: "product" | "treatment" | "consultation";
   }[];
   totalAmount: number;
   address: {
@@ -46,7 +46,7 @@ const OrderSchema = new Schema<IOrder>(
     },
     orderType: {
       type: String,
-      enum: ["product", "treatment"],
+      enum: ["product", "treatment", "consultation"],
       default: "product",
       index: true,
     },
@@ -57,7 +57,11 @@ const OrderSchema = new Schema<IOrder>(
         quantity: { type: Number, required: true },
         price: { type: Number, required: true },
         image: { type: String },
-        itemType: { type: String, enum: ["product", "treatment"], default: "product" },
+        itemType: {
+          type: String,
+          enum: ["product", "treatment", "consultation"],
+          default: "product",
+        },
       },
     ],
     totalAmount: {
