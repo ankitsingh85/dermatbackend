@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import jwt from "jsonwebtoken";
 import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
 import {
@@ -8,20 +7,13 @@ import {
   parseClinicAddresses,
 } from "../utils/clinicAddresses";
 import { generateNextClinicCuc } from "../utils/clinicCuc";
+import { generateAuthToken } from "../utils/authToken";
 import {
   assertVerifiedOtpSession,
   consumeVerifiedOtpSession,
   sendTwoFactorOtp,
   verifyTwoFactorOtp,
 } from "../utils/twoFactorOtp";
-
-const generateToken = (id: string, role: string, contactNo?: string) => {
-  return jwt.sign(
-    { id, role, contactNo },
-    process.env.JWT_SECRET || "secret",
-    { expiresIn: "1h" }
-  );
-};
 
 const slugifyClinicName = (value: string) => {
   const slug = value
@@ -34,7 +26,7 @@ const slugifyClinicName = (value: string) => {
   return slug || "clinic-detail-page";
 };
 
-const buildUniqueClinicSlug = async (clinicName: string, excludeId?: string) => {
+export const buildUniqueClinicSlug = async (clinicName: string, excludeId?: string) => {
   const baseSlug = slugifyClinicName(clinicName);
   let slug = baseSlug;
   let counter = 2;
@@ -111,18 +103,211 @@ export const verifyClinicLoginOtp = async (req: Request, res: Response) => {
   }
 };
 
+export type ClinicMobileLoginFields = {
+  clinicName?: unknown;
+  email?: unknown;
+  address?: unknown;
+  ownerName?: unknown;
+  whatsapp?: unknown;
+  dermaCategory?: unknown;
+  addresses?: unknown;
+};
+
+export type ClinicMobileLoginResult = {
+  status: number;
+  body: Record<string, unknown>;
+};
+
+export const findClinicByContactNo = (contactNo: string) =>
+  Clinic.findOne({ contactNumber: contactNo });
+
+// Shared tail once we have a clinic document in hand (freshly created or
+// pre-existing): consume the OTP session, gate on admin approval, issue
+// the token. Used by both the self-registration and existing-clinic paths.
+const finalizeClinicLogin = async (
+  clinic: any,
+  contactNo: string,
+  otpSessionId: unknown
+): Promise<ClinicMobileLoginResult> => {
+  await consumeVerifiedOtpSession(otpSessionId, contactNo);
+
+  // Admin approval gate — a clinic can't actually log in until an
+  // admin has reviewed and approved its registration.
+  if (clinic.approvalStatus === "pending") {
+    return {
+      status: 403,
+      body: {
+        message:
+          "Your clinic registration is submitted and pending admin approval. You'll receive an email once it's reviewed.",
+        pendingApproval: true,
+      },
+    };
+  }
+
+  if (clinic.approvalStatus === "rejected") {
+    return {
+      status: 403,
+      body: {
+        message: clinic.rejectionReason
+          ? `Your clinic registration was rejected: ${clinic.rejectionReason}`
+          : "Your clinic registration was rejected by the admin.",
+        rejected: true,
+      },
+    };
+  }
+
+  const token = generateAuthToken(clinic._id.toString(), "clinic", contactNo);
+
+  return {
+    status: 200,
+    body: {
+      message: "Clinic login successful",
+      token,
+      role: "clinic",
+      clinic: buildClinicPayload(clinic, contactNo),
+    },
+  };
+};
+
+// A clinic already exists for this contact number — fill in any fields it
+// was missing, then finalize. Factored out so the unified business-login
+// controller can call this directly once it has resolved the clinic.
+export const resolveExistingClinicLogin = async (
+  clinic: any,
+  fields: ClinicMobileLoginFields,
+  contactNo: string,
+  otpSessionId: unknown
+): Promise<ClinicMobileLoginResult> => {
+  const clinicName = String(fields.clinicName ?? "").trim();
+  const email = String(fields.email ?? "").trim().toLowerCase();
+  const address = String(fields.address ?? "").trim();
+  const ownerName = String(fields.ownerName ?? "").trim();
+  const whatsapp = normalizeContactNumber(fields.whatsapp);
+  const parsedAddresses = parseClinicAddresses(fields.addresses);
+
+  await assertVerifiedOtpSession(otpSessionId, contactNo);
+
+  const nextUpdates: Record<string, unknown> = {};
+  const hasAddressesField = Object.prototype.hasOwnProperty.call(
+    fields || {},
+    "addresses"
+  );
+  const nextAddresses = hasAddressesField ? parsedAddresses : [];
+
+  if (!clinic.contactNumber) nextUpdates.contactNumber = contactNo;
+
+  if (!clinic.clinicName && clinicName) nextUpdates.clinicName = clinicName;
+  if (!clinic.email && email) nextUpdates.email = email;
+  if (!clinic.address && address) nextUpdates.address = address;
+  if (!clinic.address && parsedAddresses.length > 0) {
+    nextUpdates.address = parsedAddresses[0]?.address || address;
+  }
+  if (!clinic.ownerName && ownerName) nextUpdates.ownerName = ownerName;
+  if (!clinic.whatsapp && whatsapp) nextUpdates.whatsapp = whatsapp;
+  if (hasAddressesField) nextUpdates.addresses = nextAddresses;
+
+  if (Object.keys(nextUpdates).length > 0) {
+    clinic = await Clinic.findByIdAndUpdate(clinic._id, nextUpdates, {
+      new: true,
+    });
+  }
+
+  if (!clinic) {
+    return { status: 500, body: { message: "Unable to complete login" } };
+  }
+
+  return finalizeClinicLogin(clinic, contactNo, otpSessionId);
+};
+
+// Core clinic OTP-login/self-registration logic, factored out of the
+// Express handler so it can be reused by the unified business-login
+// controller (which resolves doctor vs. clinic before delegating here).
+export const resolveClinicMobileLogin = async (
+  fields: ClinicMobileLoginFields,
+  contactNo: string,
+  otpSessionId: unknown
+): Promise<ClinicMobileLoginResult> => {
+  const clinicName = String(fields.clinicName ?? "").trim();
+  const email = String(fields.email ?? "").trim().toLowerCase();
+  const address = String(fields.address ?? "").trim();
+  const ownerName = String(fields.ownerName ?? "").trim();
+  const whatsapp = normalizeContactNumber(fields.whatsapp);
+  const dermaCategoryInput = String(fields.dermaCategory ?? "").trim();
+  const parsedAddresses = parseClinicAddresses(fields.addresses);
+
+  await assertVerifiedOtpSession(otpSessionId, contactNo);
+
+  const clinic = await findClinicByContactNo(contactNo);
+
+  if (clinic) {
+    return resolveExistingClinicLogin(clinic, fields, contactNo, otpSessionId);
+  }
+
+  // Brand-new business signups only need a name and address — email
+  // and everything else is optional here.
+  if (!clinicName || !address) {
+    return {
+      status: 400,
+      body: { message: "Name and address are required", needsProfile: true },
+    };
+  }
+
+  if (email) {
+    const existingByEmail = await Clinic.findOne({ email });
+    if (existingByEmail) {
+      return {
+        status: 400,
+        body: { message: "Email already registered with another clinic" },
+      };
+    }
+  }
+
+  const category =
+    dermaCategoryInput && (await ClinicCategory.findById(dermaCategoryInput))
+      ? dermaCategoryInput
+      : (await ClinicCategory.findOne().sort({ createdAt: 1 }))?._id;
+
+  if (!category) {
+    return {
+      status: 400,
+      body: { message: "No clinic category available. Please create one first." },
+    };
+  }
+
+  const createdClinic = await Clinic.create({
+    cuc: await generateNextClinicCuc(),
+    clinicName,
+    slug: await buildUniqueClinicSlug(clinicName),
+    dermaCategory: category,
+    address,
+    addresses:
+      parsedAddresses.length > 0
+        ? parsedAddresses
+        : [
+            buildClinicAddressFromText(address, {
+              type: "Clinic",
+              fullName: clinicName,
+              mobileNo: contactNo,
+            }),
+          ],
+    email: email || undefined,
+    contactNumber: contactNo,
+    ownerName: ownerName || undefined,
+    whatsapp: whatsapp || undefined,
+    clinicStatus: "Open",
+    // New self-registrations wait for an admin to approve them
+    // before they can actually log in — see finalizeClinicLogin.
+    approvalStatus: "pending",
+  });
+
+  return finalizeClinicLogin(createdClinic, contactNo, otpSessionId);
+};
+
 export const clinicMobileLogin = async (req: Request, res: Response) => {
   try {
     const contactNo = normalizeContactNumber(
       req.body?.contactNo ?? req.body?.contactNumber
     );
-    const clinicName = String(req.body?.clinicName ?? "").trim();
-    const email = String(req.body?.email ?? "").trim().toLowerCase();
-    const address = String(req.body?.address ?? "").trim();
-    const ownerName = String(req.body?.ownerName ?? "").trim();
-    const whatsapp = normalizeContactNumber(req.body?.whatsapp);
-    const dermaCategoryInput = String(req.body?.dermaCategory ?? "").trim();
-    const parsedAddresses = parseClinicAddresses(req.body?.addresses);
 
     if (contactNo.length !== 10) {
       return res
@@ -130,136 +315,10 @@ export const clinicMobileLogin = async (req: Request, res: Response) => {
         .json({ message: "Enter a valid 10 digit mobile number" });
     }
 
-   const otpSessionId = req.body?.otpSessionId ?? req.body?.sessionId;
+    const otpSessionId = req.body?.otpSessionId ?? req.body?.sessionId;
+    const result = await resolveClinicMobileLogin(req.body || {}, contactNo, otpSessionId);
 
-await assertVerifiedOtpSession(
-  otpSessionId,
-  contactNo
-);
-
-let clinic = await Clinic.findOne({
-  contactNumber: contactNo
-});
-
-    if (!clinic) {
-      if (!clinicName || !email || !address) {
-        return res.status(400).json({
-          message: "Clinic details are required",
-          needsProfile: true,
-        });
-      }
-
-      const existingByEmail = await Clinic.findOne({ email });
-      if (existingByEmail) {
-        return res.status(400).json({
-          message: "Email already registered with another clinic",
-        });
-      }
-
-      const category =
-        dermaCategoryInput && (await ClinicCategory.findById(dermaCategoryInput))
-          ? dermaCategoryInput
-          : (await ClinicCategory.findOne().sort({ createdAt: 1 }))?._id;
-
-      if (!category) {
-        return res.status(400).json({
-          message: "No clinic category available. Please create one first.",
-        });
-      }
-
-      clinic = await Clinic.create({
-        cuc: await generateNextClinicCuc(),
-        clinicName,
-        slug: await buildUniqueClinicSlug(clinicName),
-        dermaCategory: category,
-        address,
-        addresses:
-          parsedAddresses.length > 0
-            ? parsedAddresses
-            : [
-                buildClinicAddressFromText(address, {
-                  type: "Clinic",
-                  fullName: clinicName,
-                  mobileNo: contactNo,
-                }),
-              ],
-        email,
-        contactNumber: contactNo,
-        ownerName: ownerName || undefined,
-        whatsapp: whatsapp || undefined,
-        clinicStatus: "Open",
-        // New self-registrations wait for an admin to approve them
-        // before they can actually log in — see the approvalStatus
-        // check below.
-        approvalStatus: "pending",
-      });
-    } else {
-      const nextUpdates: Record<string, unknown> = {};
-      const hasAddressesField = Object.prototype.hasOwnProperty.call(
-        req.body || {},
-        "addresses"
-      );
-      const nextAddresses = hasAddressesField ? parsedAddresses : [];
-
-      if (!clinic.contactNumber) nextUpdates.contactNumber = contactNo;
-
-      if (!clinic.clinicName && clinicName) nextUpdates.clinicName = clinicName;
-      if (!clinic.email && email) nextUpdates.email = email;
-      if (!clinic.address && address) nextUpdates.address = address;
-      if (!clinic.address && parsedAddresses.length > 0) {
-        nextUpdates.address = parsedAddresses[0]?.address || address;
-      }
-      if (!clinic.ownerName && ownerName) nextUpdates.ownerName = ownerName;
-      if (!clinic.whatsapp && whatsapp) nextUpdates.whatsapp = whatsapp;
-      if (hasAddressesField) nextUpdates.addresses = nextAddresses;
-
-      if (Object.keys(nextUpdates).length > 0) {
-        clinic = await Clinic.findByIdAndUpdate(clinic._id, nextUpdates, {
-          new: true,
-        });
-      }
-    }
-
-    if (!clinic) {
-      return res.status(500).json({ message: "Unable to complete login" });
-    }
-
-   await consumeVerifiedOtpSession(
-  otpSessionId,
-  contactNo
-);
-
-    // Admin approval gate — a clinic can't actually log in until an
-    // admin has reviewed and approved its registration.
-    if (clinic.approvalStatus === "pending") {
-      return res.status(403).json({
-        message:
-          "Your clinic registration is submitted and pending admin approval. You'll receive an email once it's reviewed.",
-        pendingApproval: true,
-      });
-    }
-
-    if (clinic.approvalStatus === "rejected") {
-      return res.status(403).json({
-        message: clinic.rejectionReason
-          ? `Your clinic registration was rejected: ${clinic.rejectionReason}`
-          : "Your clinic registration was rejected by the admin.",
-        rejected: true,
-      });
-    }
-
-const token = generateToken(
-  clinic._id.toString(),
-  "clinic",
-  contactNo
-);
-
-    return res.status(200).json({
-      message: "Clinic login successful",
-      token,
-      role: "clinic",
-      clinic: buildClinicPayload(clinic, contactNo),
-    });
+    return res.status(result.status).json(result.body);
   } catch (err: any) {
     console.error("Clinic mobile login error:", err);
     return res.status(500).json({

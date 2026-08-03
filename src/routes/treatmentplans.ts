@@ -370,7 +370,7 @@ JSON.parse(serviceCategory),
 
       const populated = await TreatmentPlan.findById(created._id).populate(
         "clinic",
-        "clinicName email"
+        "clinicName email address city sector pincode latitude longitude mapLink verifiedBadge slug"
       );
 
       return res.status(201).json(populated);
@@ -396,7 +396,7 @@ router.get("/", async (req, res) => {
     const plans = await TreatmentPlan.find(
       includeInactive ? {} : { isActive: { $ne: false } }
     )
-      .populate("clinic", "clinicName email")
+      .populate("clinic", "clinicName email address city sector pincode latitude longitude mapLink verifiedBadge slug")
       .sort({ createdAt: -1 });
 
     for (const plan of plans as any[]) {
@@ -416,27 +416,24 @@ router.get("/:identifier", async (req, res) => {
       String(req.query.includeInactive || "").toLowerCase() === "true";
     const visibilityFilter = includeInactive ? {} : { isActive: { $ne: false } };
 
+    const clinicPopulateFields =
+      "clinicName email address city sector pincode latitude longitude mapLink verifiedBadge slug";
+
     let plan = await TreatmentPlan.findOne({
       slug: identifier,
       ...visibilityFilter,
-    }).populate(
-      "clinic",
-      "clinicName email"
-    );
+    }).populate("clinic", clinicPopulateFields);
 
     if (!plan && mongoose.isValidObjectId(identifier)) {
       plan = await TreatmentPlan.findOne({
         _id: identifier,
         ...visibilityFilter,
-      }).populate(
-        "clinic",
-        "clinicName email"
-      );
+      }).populate("clinic", clinicPopulateFields);
     }
 
     if (!plan) {
       const plans = await TreatmentPlan.find(visibilityFilter)
-        .populate("clinic", "clinicName email")
+        .populate("clinic", "clinicName email address city sector pincode latitude longitude mapLink verifiedBadge slug")
         .sort({ createdAt: -1 });
       const matched = (plans as any[]).find(
         (item) =>
@@ -477,6 +474,23 @@ router.put(
           payload.treatmentName,
           req.params.id
         );
+      }
+
+      // FormData always sends this as a JSON-encoded string — parse it back
+      // into a real array before it reaches Mongoose, same fix as clinic
+      // below (otherwise it gets stored as one malformed string entry).
+      if (typeof payload.serviceCategory === "string") {
+        try {
+          const parsedCategories = JSON.parse(payload.serviceCategory);
+          if (!Array.isArray(parsedCategories)) {
+            return res.status(400).json({ message: "Invalid service category data" });
+          }
+          payload.serviceCategory = parsedCategories.filter(
+            (item: unknown): item is string => typeof item === "string" && item.trim().length > 0
+          );
+        } catch {
+          return res.status(400).json({ message: "Invalid service category data" });
+        }
       }
 
       if (payload.clinic) {
@@ -546,6 +560,10 @@ message:"Some clinics are invalid"
 });
 
 }
+
+// Write the parsed/validated array back — payload.clinic was still the
+// raw JSON string at this point, which Mongoose can't cast to [ObjectId].
+payload.clinic = clinicsArray;
       }
 
       if (payload.mrp !== undefined) payload.mrp = parseNumber(payload.mrp);
@@ -600,7 +618,7 @@ message:"Some clinics are invalid"
         req.params.id,
         payload,
         { new: true, runValidators: true }
-      ).populate("clinic", "clinicName email");
+      ).populate("clinic", "clinicName email address city sector pincode latitude longitude mapLink verifiedBadge slug");
 
       if (!updated) {
         return res.status(404).json({ message: "Treatment plan not found" });

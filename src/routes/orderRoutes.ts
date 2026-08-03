@@ -114,6 +114,7 @@ router.post("/", async (req, res) => {
     const {
       userId,
       clinicId,
+      b2bUserId,
       products,
       totalAmount,
       address,
@@ -124,7 +125,7 @@ router.post("/", async (req, res) => {
       razorpaySignature,
     } = req.body;
 
-    if ((!userId && !clinicId) || !products || !totalAmount || !address) {
+    if ((!userId && !clinicId && !b2bUserId) || !products || !totalAmount || !address) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
@@ -136,13 +137,21 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "Invalid clinicId" });
     }
 
+    if (b2bUserId && !mongoose.Types.ObjectId.isValid(b2bUserId)) {
+      return res.status(400).json({ message: "Invalid b2bUserId" });
+    }
+
     // const user = await UserProfile.findById(userId);
     // if (!user) return res.status(404).json({ message: "User not found" });
 
+    const resolvedOwnerType =
+      ownerType === "clinic" ? "clinic" : ownerType === "b2buser" ? "b2buser" : "user";
+
     const order = new Order({
-      userId: userId || undefined,
-      clinicId: clinicId || undefined,
-      ownerType: ownerType === "clinic" ? "clinic" : "user",
+      userId: resolvedOwnerType === "user" ? userId || undefined : undefined,
+      clinicId: resolvedOwnerType === "clinic" ? clinicId || undefined : undefined,
+      b2bUserId: resolvedOwnerType === "b2buser" ? b2bUserId || undefined : undefined,
+      ownerType: resolvedOwnerType,
       products,
       totalAmount,
       address,
@@ -167,11 +176,12 @@ router.get("/my", async (req, res) => {
   try {
     const userId = req.headers["x-user-id"] as string;
     const clinicId = req.headers["x-clinic-id"] as string;
+    const b2bUserId = req.headers["x-b2buser-id"] as string;
     const ownerType = String(req.headers["x-owner-type"] || "").toLowerCase();
     const requestedType = req.query.orderType as string | undefined;
 
-    if (!userId && !clinicId) {
-      return res.status(401).json({ message: "User or clinic ID missing" });
+    if (!userId && !clinicId && !b2bUserId) {
+      return res.status(401).json({ message: "User, clinic, or B2B user ID missing" });
     }
 
     if (userId && !mongoose.Types.ObjectId.isValid(userId)) {
@@ -182,9 +192,15 @@ router.get("/my", async (req, res) => {
       return res.status(400).json({ message: "Invalid clinic ID" });
     }
 
+    if (b2bUserId && !mongoose.Types.ObjectId.isValid(b2bUserId)) {
+      return res.status(400).json({ message: "Invalid B2B user ID" });
+    }
+
     const query: any = {};
     if (ownerType === "clinic" || clinicId) {
       query.clinicId = clinicId;
+    } else if (ownerType === "b2buser" || b2bUserId) {
+      query.b2bUserId = b2bUserId;
     } else {
       query.userId = userId;
     }
@@ -192,6 +208,7 @@ router.get("/my", async (req, res) => {
     const orders = await Order.find(query)
       .populate("userId", "name email")
       .populate("clinicId", "clinicName email address contactNumber")
+      .populate("b2bUserId", "name email contactNo")
       .sort({ createdAt: -1 });
 
     return res

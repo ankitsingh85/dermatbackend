@@ -11,6 +11,7 @@ import {
   type ClinicAddress,
 } from "../utils/clinicAddresses";
 import { sendMail } from "../utils/email";
+import { generateNextClinicCuc } from "../utils/clinicCuc";
 const router = express.Router();
 /* ================= LOCATION HELPERS ================= */
 
@@ -265,45 +266,6 @@ const getUploadedPaths = (files: Express.Multer.File[] | undefined): string[] =>
 
 const hasOwn = (obj: Record<string, unknown> | undefined, key: string) =>
   Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
-
-/* ================= CUC GENERATOR =================
-   Format: ClinicName-<YYYYMM>-<N>
-   e.g. "ClinicName-202606-1", "ClinicName-202606-2", "ClinicName-202606-3" ...
-   "ClinicName" is a fixed prefix (NOT based on the actual clinic's name).
-   The sequence number increments dynamically per month, across all clinics.
-*/
-const CUC_PREFIX_LABEL = "ClicName";
-
-const escapeRegExp = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const generateNextClinicCuc = async () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-
-  const prefix = `${CUC_PREFIX_LABEL}-${year}${month}-`;
-  const escapedPrefix = escapeRegExp(prefix);
-
-  const existing = await Clinic.find({
-    cuc: { $regex: `^${escapedPrefix}\\d+$` },
-  }).select("cuc");
-
-  let maxSeq = 0;
-  const seqRegex = new RegExp(`^${escapedPrefix}(\\d+)$`);
-
-  for (const clinic of existing) {
-    const match = clinic.cuc?.match(seqRegex);
-    if (match) {
-      const seq = parseInt(match[1], 10);
-      if (!Number.isNaN(seq) && seq > maxSeq) {
-        maxSeq = seq;
-      }
-    }
-  }
-
-  return `${prefix}${maxSeq + 1}`;
-};
 
 const buildClinicAddressesFromRequest = (
   body: Record<string, unknown> | undefined,
@@ -708,6 +670,22 @@ router.put(
     const parsedSpecialOffers = parseStringArray(req.body?.specialOffers);
     const parsedPhotos = parseStringArray(req.body?.photos);
     const parsedCertifications = parseStringArray(req.body?.certifications);
+    const parsedRateCardMerged = [
+      ...(hasOwn(req.body, "rateCard") ? parsedRateCard : []),
+      ...uploadedRateCard,
+    ];
+    const parsedSpecialOffersMerged = [
+      ...(hasOwn(req.body, "specialOffers") ? parsedSpecialOffers : []),
+      ...uploadedSpecialOffers,
+    ];
+    const parsedPhotosMerged = [
+      ...(hasOwn(req.body, "photos") ? parsedPhotos : []),
+      ...uploadedPhotos,
+    ];
+    const parsedCertificationsMerged = [
+      ...(hasOwn(req.body, "certifications") ? parsedCertifications : []),
+      ...uploadedCertifications,
+    ];
     const hasAddressesField = hasOwn(req.body, "addresses");
     const parsedAddresses = parseClinicAddresses(req.body?.addresses);
     const nextAddresses = hasAddressesField
@@ -728,20 +706,8 @@ router.put(
         formatClinicAddressText(nextAddresses[0]) ||
         ""
       : String(req.body?.address || "").trim() || existingClinic.address || "";
-const updateLocation =
-extractLatLngFromMapLink(req.body.mapLink);
+    const updateLocation = extractLatLngFromMapLink(req.body.mapLink);
 
-
-if(updateLocation){
-
- existingClinic.latitude =
- updateLocation.latitude;
-
-
- existingClinic.longitude =
- updateLocation.longitude;
-
-}
     const updated = await Clinic.findByIdAndUpdate(
       req.params.id,
       {
@@ -760,29 +726,26 @@ if(updateLocation){
         ...(hasOwn(req.body, "isActive")
           ? { isActive: parseBoolean(req.body.isActive, true) }
           : {}),
+        // mapLink drives latitude/longitude — only overwrite them when a
+        // coordinate pair was actually extracted from the submitted link.
+        ...(updateLocation
+          ? { latitude: updateLocation.latitude, longitude: updateLocation.longitude }
+          : {}),
         slug: nextSlug,
         doctors: parsedDoctors,
         ...(uploadedClinicLogo.length ? { clinicLogo: uploadedClinicLogo[0] } : {}),
         ...(uploadedBannerImage.length ? { bannerImage: uploadedBannerImage[0] } : {}),
-        ...(uploadedRateCard.length
-          ? { rateCard: uploadedRateCard }
-          : req.body?.rateCard
-          ? { rateCard: parsedRateCard }
+        ...(hasOwn(req.body, "rateCard") || uploadedRateCard.length
+          ? { rateCard: parsedRateCardMerged }
           : {}),
-        ...(uploadedSpecialOffers.length
-          ? { specialOffers: uploadedSpecialOffers }
-          : req.body?.specialOffers
-          ? { specialOffers: parsedSpecialOffers }
+        ...(hasOwn(req.body, "specialOffers") || uploadedSpecialOffers.length
+          ? { specialOffers: parsedSpecialOffersMerged }
           : {}),
-        ...(uploadedPhotos.length
-          ? { photos: uploadedPhotos }
-          : req.body?.photos
-          ? { photos: parsedPhotos }
+        ...(hasOwn(req.body, "photos") || uploadedPhotos.length
+          ? { photos: parsedPhotosMerged }
           : {}),
-        ...(uploadedCertifications.length
-          ? { certifications: uploadedCertifications }
-          : req.body?.certifications
-          ? { certifications: parsedCertifications }
+        ...(hasOwn(req.body, "certifications") || uploadedCertifications.length
+          ? { certifications: parsedCertificationsMerged }
           : {}),
       },
       { new: true }

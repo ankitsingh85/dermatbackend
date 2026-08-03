@@ -3,7 +3,8 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface IOrder extends Document {
   userId?: mongoose.Types.ObjectId;
   clinicId?: mongoose.Types.ObjectId;
-  ownerType?: "user" | "clinic";
+  b2bUserId?: mongoose.Types.ObjectId;
+  ownerType?: "user" | "clinic" | "b2buser";
   orderType: "product" | "treatment" | "consultation";
   products: {
     id: string;
@@ -12,6 +13,14 @@ export interface IOrder extends Document {
     price: number;
     image?: string;
     itemType?: "product" | "treatment" | "consultation";
+    // Only meaningful for treatment items — the clinic the user picked
+    // (via the clinic-selection modal at checkout) to visit for that
+    // treatment. Denormalized at order time, same as the rest of the
+    // product line, so the order stays an accurate record even if the
+    // clinic's details change later.
+    clinicId?: string;
+    clinicName?: string;
+    clinicAddress?: string;
   }[];
   totalAmount: number;
   address: {
@@ -39,9 +48,15 @@ const OrderSchema = new Schema<IOrder>(
       required: false,
       index: true,
     },
+    b2bUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "B2BUser",
+      required: false,
+      index: true,
+    },
     ownerType: {
       type: String,
-      enum: ["user", "clinic"],
+      enum: ["user", "clinic", "b2buser"],
       default: "user",
     },
     orderType: {
@@ -62,6 +77,9 @@ const OrderSchema = new Schema<IOrder>(
           enum: ["product", "treatment", "consultation"],
           default: "product",
         },
+        clinicId: { type: String },
+        clinicName: { type: String },
+        clinicAddress: { type: String },
       },
     ],
     totalAmount: {
