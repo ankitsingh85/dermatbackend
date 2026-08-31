@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
+import B2BUser from "../models/B2BUser";
+import Order from "../models/order";
 import {
   buildClinicAddressFromText,
   formatClinicAddressText,
@@ -771,6 +773,18 @@ router.patch("/:id/approve", async (req, res) => {
     clinic.approvedAt = new Date();
     await clinic.save();
 
+    // If this clinic came from a B2B user's "Become a Clinic" conversion,
+    // this is the point where that's finalized: their order history moves
+    // over to the clinic account, and the B2BUser record is removed so
+    // future logins resolve to the clinic instead.
+    if (clinic.convertedFromB2BUserId) {
+      await Order.updateMany(
+        { b2bUserId: clinic.convertedFromB2BUserId },
+        { $set: { ownerType: "clinic", clinicId: clinic._id } }
+      );
+      await B2BUser.findByIdAndDelete(clinic.convertedFromB2BUserId);
+    }
+
     if (clinic.email) {
       sendMail(
         clinic.email,
@@ -799,6 +813,14 @@ router.patch("/:id/reject", async (req, res) => {
     clinic.rejectionReason = reason;
     clinic.approvedAt = undefined;
     await clinic.save();
+
+    // If this was a B2B user's conversion attempt, clear their pending
+    // marker so they keep using their B2B account and can try again later.
+    if (clinic.convertedFromB2BUserId) {
+      await B2BUser.findByIdAndUpdate(clinic.convertedFromB2BUserId, {
+        $unset: { pendingClinicId: "" },
+      });
+    }
 
     if (clinic.email) {
       sendMail(

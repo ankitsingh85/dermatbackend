@@ -89,7 +89,7 @@ const OrderSchema = new Schema<IOrder>(
     address: {
       type: {
         type: String,
-        enum: ["Home", "Work", "Other", "Clinic"],
+        enum: ["Home", "Work", "Other", "Clinic", "Doctor", "Business"],
         required: true,
       },
       address: { type: String, required: true },

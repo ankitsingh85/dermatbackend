@@ -41,6 +41,7 @@ export interface IClinic extends Document {
   whatsapp?: string;
   email?: string;
   workingHours?: IClinicWorkingHours;
+  gstNumber?: string;
   licenseNo?: string;
   experience?: string;
   treatmentsAvailable?: string;
@@ -64,6 +65,13 @@ export interface IClinic extends Document {
   approvalStatus?: "pending" | "approved" | "rejected";
   rejectionReason?: string;
   approvedAt?: Date;
+
+  // Set only when this clinic was created via a B2BUser's "Become a
+  // Clinic" conversion. The B2BUser account stays fully usable until an
+  // admin approves this clinic (see clinicRoutes.ts's /approve route,
+  // which deletes the B2BUser at that point) — see BusinessAuthController
+  // for how login resolution treats a still-pending conversion clinic.
+  convertedFromB2BUserId?: mongoose.Types.ObjectId;
 }
 
 const DoctorSchema = new Schema<IDoctor>(
@@ -155,6 +163,7 @@ const ClinicSchema = new Schema<IClinic>(
 
     workingHours: { type: ClinicWorkingHoursSchema, default: () => ({}) },
 
+    gstNumber: { type: String, trim: true, uppercase: true },
     licenseNo: String,
     experience: String,
 
@@ -183,6 +192,12 @@ const ClinicSchema = new Schema<IClinic>(
     },
     rejectionReason: { type: String, default: "" },
     approvedAt: { type: Date },
+
+    convertedFromB2BUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "B2BUser",
+      required: false,
+    },
   },
   { timestamps: true }
 );

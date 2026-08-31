@@ -11,6 +11,11 @@ export interface IDoctor extends Document {
   description?: string;
   profileImage?: string;
   address?: string;
+  // Doctor-controlled toggle (Doctor Dashboard) — whether they're currently
+  // available to be matched for an on-demand online consultation "Connect"
+  // request. Distinct from raw socket presence, which just reflects whether
+  // their browser tab is connected.
+  isAvailableForConsultation?: boolean;
   addresses?: {
     type: string;
     address?: string;
@@ -87,6 +92,11 @@ const DoctorSchema = new Schema<IDoctor>(
     address: {
       type: String,
       trim: true,
+    },
+
+    isAvailableForConsultation: {
+      type: Boolean,
+      default: false,
     },
 
     addresses: [

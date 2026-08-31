@@ -219,6 +219,14 @@ const normalizePayload = (
     payload.trainingImage = uploadedTrainingImages[0];
   }
 
+  // TRAINER IMAGE FIX (separate from the main workshop image above)
+
+  const uploadedTrainerImages = getUploadedPaths(files?.trainerImage);
+
+  if (uploadedTrainerImages.length > 0) {
+    payload.trainerImage = uploadedTrainerImages[0];
+  }
+
   // BROCHURE FIX
 
   const uploadedBrochures = getUploadedPaths(files?.brochurePdfDownload);
@@ -405,6 +413,7 @@ router.post(
   "/",
   upload.fields([
     { name: "trainingImage", maxCount: 1 },
+    { name: "trainerImage", maxCount: 1 },
     { name: "brochurePdfDownload", maxCount: 10 },
   ]),
   async (req: Request, res: Response) => {
@@ -479,6 +488,7 @@ router.put(
   "/:id",
   upload.fields([
     { name: "trainingImage", maxCount: 1 },
+    { name: "trainerImage", maxCount: 1 },
     { name: "brochurePdfDownload", maxCount: 10 },
   ]),
   async (req: Request, res: Response) => {

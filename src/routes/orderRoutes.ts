@@ -262,4 +262,35 @@ router.put("/:orderId/status", async (req, res) => {
   }
 });
 
+/** ✅ CLINIC: Delete one of the clinic's own orders (including orders
+ * inherited from a "Become a Clinic" B2B conversion) */
+router.delete("/:orderId", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ message: "Invalid order ID" });
+    }
+
+    const clinicId = req.headers["x-clinic-id"] as string;
+    const ownerType = String(req.headers["x-owner-type"] || "").toLowerCase();
+
+    if (ownerType !== "clinic" || !clinicId) {
+      return res.status(403).json({ message: "Only a clinic can delete an order" });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    if (String(order.clinicId) !== String(clinicId)) {
+      return res.status(403).json({ message: "You can only delete your own clinic orders" });
+    }
+
+    await Order.findByIdAndDelete(orderId);
+    res.status(200).json({ message: "Order deleted successfully" });
+  } catch (err: any) {
+    console.error("❌ Error deleting order:", err.message);
+    res.status(500).json({ message: "Failed to delete order", error: err.message });
+  }
+});
+
 export default router;

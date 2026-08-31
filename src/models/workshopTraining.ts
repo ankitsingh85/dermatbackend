@@ -28,6 +28,7 @@ export interface IWorkshopTraining {
   currentAvailability?: string;
   trainerInstructorName?: string;
   trainingImage?: string;
+  trainerImage?: string;
   trainerExperience?: string;
   languageOfDelivery?: string;
   whatsIncluded?: string;
@@ -122,6 +123,7 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
       },
     },
     trainingImage: { type: String, trim: true },
+    trainerImage: { type: String, trim: true },
     trainerExperience: { type: String, trim: true },
     languageOfDelivery: {
       type: String,

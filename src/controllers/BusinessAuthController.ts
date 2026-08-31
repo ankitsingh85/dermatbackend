@@ -104,7 +104,16 @@ export const businessMobileLogin = async (req: Request, res: Response) => {
 
     const clinic = await findClinicByContactNo(contactNo);
 
-    if (clinic) {
+    // A clinic that came from a B2B "Become a Clinic" conversion and
+    // hasn't been approved yet (still pending, or was rejected) doesn't
+    // take over login — the B2BUser account underneath it keeps working
+    // normally until an admin actually approves it. Only once approved
+    // does this branch resolve as a clinic login (and by then the
+    // B2BUser record has already been deleted by the /approve route).
+    const isUnresolvedConversion =
+      clinic?.convertedFromB2BUserId && clinic.approvalStatus !== "approved";
+
+    if (clinic && !isUnresolvedConversion) {
       const result = await resolveExistingClinicLogin(clinic, req.body || {}, contactNo, otpSessionId);
       return res.status(result.status).json(result.body);
     }

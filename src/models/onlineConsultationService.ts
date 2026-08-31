@@ -8,10 +8,11 @@ export interface IOnlineConsultationService extends Document {
   consultationFee: number;
   offerPrice?: number;
   discountPercent: number;
-  timingSlots: string[];
-  bookedSlots: string[];
-  nextAvailableSlot: string;
   isActive: boolean;
+  // Daily recurring "Connect with Doctor" window, in IST, 24hr "HH:mm".
+  // Undefined/empty on either end means no restriction (available all day).
+  availabilityStartTime?: string;
+  availabilityEndTime?: string;
 }
 
 const OnlineConsultationServiceSchema: Schema = new Schema<IOnlineConsultationService>(
@@ -54,23 +55,19 @@ const OnlineConsultationServiceSchema: Schema = new Schema<IOnlineConsultationSe
       max: 100,
       default: 0,
     },
-    timingSlots: {
-      type: [String],
-      default: [],
-    },
-    bookedSlots: {
-      type: [String],
-      default: [],
-    },
-    // Derived server-side from timingSlots/bookedSlots — the first
-    // timing slot that isn't already booked. Not directly editable.
-    nextAvailableSlot: {
-      type: String,
-      default: "",
-    },
     isActive: {
       type: Boolean,
       default: true,
+    },
+    availabilityStartTime: {
+      type: String,
+      trim: true,
+      match: [/^([01]\d|2[0-3]):[0-5]\d$/, "Use 24hr HH:mm format"],
+    },
+    availabilityEndTime: {
+      type: String,
+      trim: true,
+      match: [/^([01]\d|2[0-3]):[0-5]\d$/, "Use 24hr HH:mm format"],
     },
   },
   { timestamps: true }

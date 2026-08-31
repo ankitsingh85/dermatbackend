@@ -12,6 +12,13 @@ export interface IB2BUser {
   state?: string;
   pincode?: string;
   status: "active" | "inactive";
+
+  // Set while a "Become a Clinic" conversion is awaiting admin approval —
+  // the B2BUser account stays fully usable in the meantime. Cleared on
+  // rejection (so they can try again); on approval the B2BUser record is
+  // deleted entirely (see clinicRoutes.ts's /approve route).
+  pendingClinicId?: mongoose.Types.ObjectId;
+
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -40,6 +47,11 @@ const B2BUserSchema = new Schema<B2BUserDocument>(
       type: String,
       enum: ["active", "inactive"],
       default: "active",
+    },
+    pendingClinicId: {
+      type: Schema.Types.ObjectId,
+      ref: "Clinic",
+      required: false,
     },
   },
   { timestamps: true }

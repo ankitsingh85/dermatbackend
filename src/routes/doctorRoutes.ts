@@ -93,6 +93,35 @@ router.get("/me", doctorAuth, async (req: DoctorAuthRequest, res) => {
   }
 });
 
+/* ================= TOGGLE CONSULTATION AVAILABILITY ================= */
+router.patch("/me/availability", doctorAuth, async (req: DoctorAuthRequest, res) => {
+  try {
+    const doctorId = req.doctor?.id;
+    if (!doctorId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const isAvailableForConsultation = Boolean(req.body?.isAvailableForConsultation);
+
+    const doctor = await Doctor.findByIdAndUpdate(
+      doctorId,
+      { isAvailableForConsultation },
+      { new: true }
+    );
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    return res.json(buildDoctorPayload(doctor));
+  } catch (err: any) {
+    console.error("Update doctor availability error:", err);
+    return res.status(500).json({
+      message: "Failed to update availability",
+      error: err.message,
+    });
+  }
+});
+
 /* ================= GET NEXT DOCTOR CODE ================= */
 router.get("/next-code", async (_req, res) => {
   try {

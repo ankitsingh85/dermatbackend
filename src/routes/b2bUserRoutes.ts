@@ -52,10 +52,6 @@ const validateB2BUserPayload = (
     if (!payload.name) return "Name is required";
   }
 
-  if (!partial || payload.contactPerson) {
-    if (!payload.contactPerson) return "Contact person is required";
-  }
-
   if (!partial || payload.contactNo) {
     if (!payload.contactNo) return "Contact number is required";
     if (!contactRegex.test(payload.contactNo)) {
@@ -100,6 +96,10 @@ router.post("/", async (req: Request, res: Response) => {
     const { email, ...requiredPayload } = payload;
     const user = await B2BUser.create({
       ...requiredPayload,
+      // The admin "Create B2B User" form no longer collects a separate
+      // contact person — default it to the business name, same as the
+      // self-registration signup flow does.
+      contactPerson: requiredPayload.contactPerson || requiredPayload.name,
       ...(email ? { email } : {}),
       b2bUserId: await generateB2BUserId(),
     });
