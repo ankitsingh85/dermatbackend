@@ -1,4 +1,7 @@
 import express, { Request, Response } from "express";
+import fs from "fs";
+import * as XLSX from "xlsx";
+import { parseCsvRows } from "../utils/bulkUploadCsv";
 import upload from "../middleware/uploads";
 import WorkshopTraining from "../models/workshopTraining";
 
@@ -62,10 +65,31 @@ const parseNumber = (value: unknown) => {
   return Number.isNaN(parsed) ? undefined : parsed;
 };
 
+// Parses a date-only string as UTC midnight, accepting both "YYYY-MM-DD"
+// and "M/D/YYYY" (with or without leading zeros). Plain `new Date(string)`
+// treats anything other than strict ISO "YYYY-MM-DD" as LOCAL midnight —
+// on a positive-UTC-offset server (e.g. IST) that silently shifts the
+// stored date back a day for "M/D/YYYY" input, so both accepted formats
+// are parsed explicitly here instead of trusting the ambient timezone.
 const parseDateValue = (value: unknown) => {
   if (!value) return undefined;
-  const parsedDate = new Date(String(value));
-  return Number.isNaN(parsedDate.getTime()) ? "INVALID_DATE" : parsedDate;
+  const str = String(value).trim();
+  if (!str) return undefined;
+
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+    return Number.isNaN(date.getTime()) ? "INVALID_DATE" : date;
+  }
+
+  const mdy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    const date = new Date(Date.UTC(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2])));
+    return Number.isNaN(date.getTime()) ? "INVALID_DATE" : date;
+  }
+
+  const fallback = new Date(str);
+  return Number.isNaN(fallback.getTime()) ? "INVALID_DATE" : fallback;
 };
 
 const getUploadedPaths = (
@@ -458,6 +482,179 @@ router.post(
     }
   },
 );
+
+/* ================= BULK CREATE ================= */
+
+const normalizeHeader = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const getCell = (row: Record<string, unknown>, headers: string[]) => {
+  for (const header of headers) {
+    const foundKey = Object.keys(row).find((key) => normalizeHeader(key) === header);
+    if (foundKey) {
+      const raw = row[foundKey];
+      // A cell XLSX parsed as a date (cellDates:true) comes back as a Date
+      // object — stringify it as ISO rather than via Date#toString(), which
+      // is locale/timezone-formatted text that isn't reliably re-parseable.
+      if (raw instanceof Date) return raw.toISOString();
+      return String(raw ?? "").trim();
+    }
+  }
+  return "";
+};
+
+const readWorkshopTrainingRows = (filePath: string) => {
+  if (filePath.toLowerCase().endsWith(".csv")) {
+    return parseCsvRows(fs.readFileSync(filePath));
+  }
+  // cellDates:true — converts a genuine Excel date-serial cell into a JS
+  // Date instead of a raw serial number.
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+    defval: "",
+  });
+};
+
+// Every column here matches a field on the manual "Create Workshop
+// Training" form (CreateWorkshopTraning.tsx) 1:1 — trainingUniqueCode is
+// the only exception, since that's always auto-generated, same as on the
+// manual form. trainingType is stored as plain names (not ids), matching
+// how the manual form's checkboxes submit `option.name` directly.
+const WORKSHOP_TRAINING_BULK_FIELD_HEADERS: Record<string, string[]> = {
+  trainingName: ["trainingname", "name"],
+  hsnCode: ["hsncode", "hsn"],
+  discountPercent: ["discountpercent", "discount"],
+  instituteName: ["institutename", "institute"],
+  trainingDuration: ["trainingduration", "duration"],
+  modeOfTraining: ["modeoftraining", "mode"],
+  startDate: ["startdate"],
+  endDate: ["enddate"],
+  registrationDeadline: ["registrationdeadline", "deadline"],
+  curriculumTopicsCovered: ["curriculumtopicscovered", "curriculum"],
+  certificationProvided: ["certificationprovided", "certification"],
+  affiliationAccreditation: ["affiliationaccreditation", "affiliation"],
+  feesInr: ["feesinr", "fees"],
+  applyDiscountVoucher: ["applydiscountvoucher", "discountvoucher"],
+  netFeesInr: ["netfeesinr", "netfees"],
+  installmentEmiOption: ["installmentemioption", "emi", "installment"],
+  location: ["location"],
+  maximumSeatsBatchSize: ["maximumseatsbatchsize", "seats", "batchsize"],
+  currentAvailability: ["currentavailability", "availability"],
+  trainerInstructorName: ["trainerinstructorname", "trainername"],
+  trainingImage: ["trainingimage", "trainingimageurl"],
+  trainerImage: ["trainerimage", "trainerimageurl"],
+  trainerExperience: ["trainerexperience"],
+  languageOfDelivery: ["languageofdelivery", "language"],
+  whatsIncluded: ["whatsincluded", "included"],
+  whatsNotIncluded: ["whatsnotincluded", "notincluded"],
+  learningOutcomes: ["learningoutcomes", "outcomes"],
+  courseDemoVideo: ["coursedemovideo", "demovideo", "video"],
+  refundCancellationPolicy: ["refundcancellationpolicy", "refundpolicy"],
+  postTrainingSupport: ["posttrainingsupport", "support"],
+  contactForQueries: ["contactforqueries", "contact"],
+};
+
+router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV or Excel file required" });
+    }
+
+    const ext = req.file.originalname.split(".").pop()?.toLowerCase();
+    if (!ext || !["csv", "xls", "xlsx"].includes(ext)) {
+      fs.unlink(req.file.path, () => undefined);
+      return res.status(400).json({ message: "Only CSV, XLS, or XLSX files are allowed" });
+    }
+
+    const rows = readWorkshopTrainingRows(req.file.path);
+    fs.unlink(req.file.path, () => undefined);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "No rows found in uploaded file" });
+    }
+
+    const skipped: { row: number; reason: string }[] = [];
+    const created: unknown[] = [];
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const rowNumber = index + 2;
+
+      const body: Record<string, unknown> = {};
+      for (const [field, headers] of Object.entries(WORKSHOP_TRAINING_BULK_FIELD_HEADERS)) {
+        const value = getCell(row, headers);
+        if (value) body[field] = value;
+      }
+
+      const trainingTypeRaw = getCell(row, ["trainingtype", "trainingtypes"]);
+      if (trainingTypeRaw) {
+        body.trainingType = trainingTypeRaw
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+      }
+
+      const targetAudienceRaw = getCell(row, ["targetaudience", "audience"]);
+      if (targetAudienceRaw) {
+        body.targetAudience = targetAudienceRaw
+          .split(",")
+          .map((a) => a.trim())
+          .filter(Boolean);
+      }
+
+      const brochureRaw = getCell(row, ["brochurepdfdownload", "brochure", "brochureurls"]);
+      if (brochureRaw) {
+        body.brochurePdfDownload = brochureRaw
+          .split(",")
+          .map((u) => u.trim())
+          .filter(Boolean);
+      }
+
+      const payload = normalizePayload(body);
+      // validatePayload requires trainingUniqueCode to be present (unlike
+      // Course's equivalent validator), so it has to be generated before
+      // validating, not after.
+      payload.trainingUniqueCode = await generateTrainingUniqueCode();
+      const validationError = validatePayload(payload, true);
+      if (validationError) {
+        skipped.push({ row: rowNumber, reason: validationError.message });
+        continue;
+      }
+
+      try {
+        const training = await WorkshopTraining.create({
+          ...payload,
+          trainingName: String(payload.trainingName).trim(),
+          trainingUniqueCode: String(payload.trainingUniqueCode).trim(),
+        });
+        created.push(training);
+      } catch (err: any) {
+        skipped.push({ row: rowNumber, reason: err.message || "Failed to create workshop training" });
+      }
+    }
+
+    if (!created.length) {
+      return res.status(400).json({
+        message: "No valid workshop trainings found in uploaded file",
+        skipped,
+      });
+    }
+
+    res.status(201).json({
+      message: `${created.length} workshop trainings uploaded successfully`,
+      createdCount: created.length,
+      skipped,
+    });
+  } catch (err: any) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    res.status(400).json({ message: err.message || "Bulk upload failed" });
+  }
+});
 
 router.get("/", async (_req: Request, res: Response) => {
   try {

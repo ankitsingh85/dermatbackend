@@ -1,5 +1,8 @@
 import express, { Request, Response } from "express";
 import mongoose from "mongoose";
+import fs from "fs";
+import * as XLSX from "xlsx";
+import { parseCsvRows } from "../utils/bulkUploadCsv";
 import OnlineConsultationService from "../models/onlineConsultationService";
 import Doctor from "../models/doctor";
 import Order from "../models/order";
@@ -259,6 +262,231 @@ router.get("/", async (_req: Request, res: Response) => {
     res
       .status(500)
       .json({ message: "Failed to fetch online consultation services", error: err });
+  }
+});
+
+/* ================= BULK UPLOAD ================= */
+
+const normalizeHeader = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const getCell = (row: Record<string, unknown>, headers: string[]) => {
+  for (const header of headers) {
+    const foundKey = Object.keys(row).find((key) => normalizeHeader(key) === header);
+    if (foundKey) {
+      const raw = row[foundKey];
+      // A cell XLSX parsed as a date/time (cellDates:true) comes back as a
+      // Date object — stringify it as ISO rather than via Date#toString(),
+      // which is locale/timezone-formatted text that isn't reliably
+      // re-parseable.
+      if (raw instanceof Date) return raw.toISOString();
+      return String(raw ?? "").trim();
+    }
+  }
+  return "";
+};
+
+const splitList = (value: string) =>
+  value
+    ? value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+
+const readOnlineConsultationRows = (filePath: string) => {
+  if (filePath.toLowerCase().endsWith(".csv")) {
+    return parseCsvRows(fs.readFileSync(filePath));
+  }
+  // cellDates:true — converts a genuine Excel date-serial cell into a JS
+  // Date instead of a raw serial number.
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+    defval: "",
+  });
+};
+
+router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV or Excel file required" });
+    }
+
+    const ext = req.file.originalname.split(".").pop()?.toLowerCase();
+    if (!ext || !["csv", "xls", "xlsx"].includes(ext)) {
+      fs.unlink(req.file.path, () => undefined);
+      return res.status(400).json({ message: "Only CSV, XLS, or XLSX files are allowed" });
+    }
+
+    const rows = readOnlineConsultationRows(req.file.path);
+    fs.unlink(req.file.path, () => undefined);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "No rows found in uploaded file" });
+    }
+
+    const doctorDocs = await Doctor.find({}, "email title firstName lastName");
+    const doctorIdByEmail = new Map<string, string>();
+    // null = more than one doctor shares this display name — treated as
+    // ambiguous rather than guessing which one was meant.
+    const doctorIdByName = new Map<string, string | null>();
+    for (const doctor of doctorDocs as any[]) {
+      if (doctor.email) {
+        doctorIdByEmail.set(String(doctor.email).trim().toLowerCase(), String(doctor._id));
+      }
+      const fullName = [doctor.title || "Dr.", doctor.firstName, doctor.lastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+        .toLowerCase();
+      if (fullName) {
+        doctorIdByName.set(fullName, doctorIdByName.has(fullName) ? null : String(doctor._id));
+      }
+    }
+    // The doctor picker on the manual form shows each doctor as
+    // "Dr. Name — Specialist"; admins naturally copy that label into the
+    // bulk sheet, so strip the " — Specialist" suffix before name-matching.
+    const stripSpecialistSuffix = (value: string) => value.split(" — ")[0].trim();
+    const resolveDoctorId = (raw: string): string | undefined => {
+      const trimmed = raw.trim();
+      if (!trimmed) return undefined;
+      if (trimmed.includes("@")) {
+        return doctorIdByEmail.get(trimmed.toLowerCase());
+      }
+      return doctorIdByName.get(stripSpecialistSuffix(trimmed).toLowerCase()) || undefined;
+    };
+
+    const skipped: { row: number; reason: string }[] = [];
+    const created: unknown[] = [];
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const rowNumber = index + 2;
+
+      const serviceType = getCell(row, ["servicetype"]);
+      const doctorsCell = getCell(row, ["doctors", "doctor", "doctoremails", "doctoremail"]);
+      const consultationFeeCell = getCell(row, ["consultationfee", "fee"]);
+      const offerPriceCell = getCell(row, ["offerprice"]);
+      const discountPercentCell = getCell(row, ["discountpercent", "discount"]);
+      const availabilityStartTimeCell = getCell(row, ["availabilitystarttime", "starttime"]);
+      const availabilityEndTimeCell = getCell(row, ["availabilityendtime", "endtime"]);
+      const imageUrl = getCell(row, ["imageurl", "image", "serviceimage"]);
+
+      if (!serviceType) {
+        skipped.push({ row: rowNumber, reason: "Service type is required" });
+        continue;
+      }
+
+      if (!imageUrl) {
+        skipped.push({ row: rowNumber, reason: "Service image is required" });
+        continue;
+      }
+
+      const feeValue = Number(consultationFeeCell);
+      if (!consultationFeeCell || Number.isNaN(feeValue) || feeValue < 0) {
+        skipped.push({ row: rowNumber, reason: "Enter a valid consultation fee" });
+        continue;
+      }
+
+      const doctorRefs = splitList(doctorsCell);
+      if (doctorRefs.length === 0) {
+        skipped.push({ row: rowNumber, reason: "Please select at least one doctor" });
+        continue;
+      }
+
+      const doctorIds: string[] = [];
+      let doctorNotFound = "";
+      for (const ref of doctorRefs) {
+        const id = resolveDoctorId(ref);
+        if (!id) {
+          doctorNotFound = ref;
+          break;
+        }
+        doctorIds.push(id);
+      }
+      if (doctorNotFound) {
+        skipped.push({ row: rowNumber, reason: `Doctor "${doctorNotFound}" not found` });
+        continue;
+      }
+
+      let offerPriceValue: number | undefined;
+      if (offerPriceCell) {
+        offerPriceValue = Number(offerPriceCell);
+        if (Number.isNaN(offerPriceValue) || offerPriceValue < 0) {
+          skipped.push({ row: rowNumber, reason: "Enter a valid offer price" });
+          continue;
+        }
+      }
+
+      let discountPercentValue = 0;
+      if (discountPercentCell) {
+        discountPercentValue = Number(discountPercentCell);
+        if (Number.isNaN(discountPercentValue) || discountPercentValue < 0 || discountPercentValue > 100) {
+          skipped.push({ row: rowNumber, reason: "Discount % must be between 0 and 100" });
+          continue;
+        }
+      }
+
+      const startTimeResult = validateTimeField(availabilityStartTimeCell || undefined);
+      if (startTimeResult.error) {
+        skipped.push({ row: rowNumber, reason: startTimeResult.error });
+        continue;
+      }
+      const endTimeResult = validateTimeField(availabilityEndTimeCell || undefined);
+      if (endTimeResult.error) {
+        skipped.push({ row: rowNumber, reason: endTimeResult.error });
+        continue;
+      }
+      if (
+        (startTimeResult.value && !endTimeResult.value) ||
+        (!startTimeResult.value && endTimeResult.value)
+      ) {
+        skipped.push({
+          row: rowNumber,
+          reason: "Set both a start and end time, or leave both blank",
+        });
+        continue;
+      }
+
+      try {
+        const serviceCode = await generateNextOnlineConsultationCode();
+        const service = await OnlineConsultationService.create({
+          serviceCode,
+          serviceType,
+          doctors: doctorIds,
+          imageUrl,
+          consultationFee: feeValue,
+          ...(offerPriceValue !== undefined ? { offerPrice: offerPriceValue } : {}),
+          discountPercent: discountPercentValue,
+          ...(startTimeResult.value ? { availabilityStartTime: startTimeResult.value } : {}),
+          ...(endTimeResult.value ? { availabilityEndTime: endTimeResult.value } : {}),
+        });
+        created.push(service);
+      } catch (err: any) {
+        skipped.push({ row: rowNumber, reason: err.message || "Failed to create online consultation service" });
+      }
+    }
+
+    if (!created.length) {
+      return res.status(400).json({
+        message: "No valid online consultation services found in uploaded file",
+        skipped,
+      });
+    }
+
+    res.status(201).json({
+      message: `${created.length} online consultation services uploaded successfully`,
+      createdCount: created.length,
+      skipped,
+    });
+  } catch (err: any) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    res.status(400).json({ message: err.message || "Bulk upload failed" });
   }
 });
 

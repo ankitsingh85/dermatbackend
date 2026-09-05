@@ -1,4 +1,7 @@
 import express, { Request, Response } from "express";
+import fs from "fs";
+import * as XLSX from "xlsx";
+import { parseCsvRows } from "../utils/bulkUploadCsv";
 import B2BProduct from "../models/B2BProduct";
 import upload from "../middleware/uploads";
 
@@ -357,6 +360,184 @@ router.post(
     }
   }
 );
+
+/* ================= BULK CREATE ================= */
+
+const normalizeHeader = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+// Parses a date-only string as UTC midnight, accepting both "YYYY-MM-DD"
+// and "M/D/YYYY" (with or without leading zeros). Plain `new Date(string)`
+// treats anything other than strict ISO "YYYY-MM-DD" as LOCAL midnight —
+// on a positive-UTC-offset server (e.g. IST) that silently shifts the
+// stored date back a day for "M/D/YYYY" input, so both accepted formats
+// are parsed explicitly here instead of trusting the ambient timezone.
+const parseDateOnly = (value: unknown): Date | undefined => {
+  const str = String(value ?? "").trim();
+  if (!str) return undefined;
+
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  const mdy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    const date = new Date(Date.UTC(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2])));
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  const fallback = new Date(str);
+  return Number.isNaN(fallback.getTime()) ? undefined : fallback;
+};
+
+const getCell = (row: Record<string, unknown>, headers: string[]) => {
+  for (const header of headers) {
+    const foundKey = Object.keys(row).find((key) => normalizeHeader(key) === header);
+    if (foundKey) {
+      const raw = row[foundKey];
+      // A cell XLSX parsed as a date (cellDates:true) comes back as a Date
+      // object — stringify it as ISO rather than via Date#toString(), which
+      // is locale/timezone-formatted text that isn't reliably re-parseable.
+      if (raw instanceof Date) return raw.toISOString();
+      return String(raw ?? "").trim();
+    }
+  }
+  return "";
+};
+
+const readB2BProductRows = (filePath: string) => {
+  if (filePath.toLowerCase().endsWith(".csv")) {
+    return parseCsvRows(fs.readFileSync(filePath));
+  }
+  // cellDates:true — converts a genuine Excel date-serial cell into a JS
+  // Date instead of a raw serial number.
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+    defval: "",
+  });
+};
+
+// Every column here matches a field on the manual "Create B2B Product"
+// form (CreateB2BProduct.tsx) 1:1 — sku is the only exception, since it's
+// always auto-generated, on the manual form too. category, productImages,
+// and promotionalTags accept comma-separated values in one cell (the
+// shared normalizeB2BPayload below already falls back to comma-splitting
+// when a cell isn't valid JSON).
+const B2B_PRODUCT_BULK_FIELD_HEADERS: Record<string, string[]> = {
+  productName: ["productname", "name"],
+  category: ["category", "categories", "categoryname", "productcategory", "productcategories"],
+  subCategory: ["subcategory"],
+  hsnCode: ["hsncode", "hsn"],
+  brandName: ["brandname", "brand"],
+  packSize: ["packsize"],
+  pricePerUnit: ["priceperunit"],
+  bulkPriceTier: ["bulkpricetier"],
+  moq: ["moq"],
+  stockAvailable: ["stockavailable", "stock"],
+  expiryDate: ["expirydate"],
+  shelfLife: ["shelflife"],
+  description: ["description"],
+  ingredients: ["ingredients"],
+  usageInstructions: ["usageinstructions"],
+  treatmentIndications: ["treatmentindications"],
+  certifications: ["certifications"],
+  manufacturerName: ["manufacturername", "manufacturer"],
+  licenseNumber: ["licensenumber", "license"],
+  mrp: ["mrp"],
+  discountedPrice: ["discountedprice", "price"],
+  gst: ["gst", "gstpercent", "tax"],
+  taxIncluded: ["taxincluded"],
+  productImages: ["productimages", "images"],
+  productVideoUrl: ["productvideourl", "videourl", "video"],
+  msds: ["msds"],
+  customerReviews: ["customerreviews", "reviews"],
+  relatedProducts: ["relatedproducts"],
+  promotionalTags: ["promotionaltags", "tags"],
+};
+
+router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV or Excel file required" });
+    }
+
+    const ext = req.file.originalname.split(".").pop()?.toLowerCase();
+    if (!ext || !["csv", "xls", "xlsx"].includes(ext)) {
+      fs.unlink(req.file.path, () => undefined);
+      return res.status(400).json({ message: "Only CSV, XLS, or XLSX files are allowed" });
+    }
+
+    const rows = readB2BProductRows(req.file.path);
+    fs.unlink(req.file.path, () => undefined);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "No rows found in uploaded file" });
+    }
+
+    const skipped: { row: number; reason: string }[] = [];
+    const created: unknown[] = [];
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const rowNumber = index + 2;
+
+      const body: Record<string, unknown> = {};
+      for (const [field, headers] of Object.entries(B2B_PRODUCT_BULK_FIELD_HEADERS)) {
+        const value = getCell(row, headers);
+        if (value) body[field] = value;
+      }
+      if (body.expiryDate) {
+        const parsedExpiry = parseDateOnly(body.expiryDate);
+        if (parsedExpiry) body.expiryDate = parsedExpiry;
+        else delete body.expiryDate;
+      }
+
+      const payload = normalizeB2BPayload(body);
+      payload.sku = await generateNextB2BSku();
+
+      const validationError = validateB2BPayload(payload, true);
+      if (validationError) {
+        skipped.push({ row: rowNumber, reason: validationError.message });
+        continue;
+      }
+
+      try {
+        const product = await B2BProduct.create(payload);
+        created.push(product);
+      } catch (err: any) {
+        let reason = err.message || "Failed to create B2B product";
+        if (err?.code === 11000) {
+          const field = Object.keys(err.keyValue || {})[0] || "field";
+          reason = `A product with this ${field} already exists (${err.keyValue?.[field]}).`;
+        }
+        skipped.push({ row: rowNumber, reason });
+      }
+    }
+
+    if (!created.length) {
+      return res.status(400).json({
+        message: "No valid B2B products found in uploaded file",
+        skipped,
+      });
+    }
+
+    res.status(201).json({
+      message: `${created.length} B2B products uploaded successfully`,
+      createdCount: created.length,
+      skipped,
+    });
+  } catch (err: any) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    res.status(400).json({ message: err.message || "Bulk upload failed" });
+  }
+});
 
 /* ================= LIST ================= */
 router.get("/", async (_req, res) => {

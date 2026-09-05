@@ -1,4 +1,7 @@
 import express, { Request, Response } from "express";
+import fs from "fs";
+import * as XLSX from "xlsx";
+import { parseCsvRows } from "../utils/bulkUploadCsv";
 import mongoose from "mongoose";
 import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
@@ -455,6 +458,219 @@ location?.longitude || null,
  }
 );
 
+/* ================= BULK CREATE ================= */
+
+const normalizeHeader = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const getCell = (row: Record<string, unknown>, headers: string[]) => {
+  for (const header of headers) {
+    const foundKey = Object.keys(row).find((key) => normalizeHeader(key) === header);
+    if (foundKey) return String(row[foundKey] ?? "").trim();
+  }
+  return "";
+};
+
+const readClinicRows = (filePath: string) => {
+  if (filePath.toLowerCase().endsWith(".csv")) {
+    return parseCsvRows(fs.readFileSync(filePath));
+  }
+  // cellDates:true — converts a genuine Excel date-serial cell into a JS
+  // Date instead of a raw serial number.
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+    defval: "",
+  });
+};
+
+const splitList = (value: string) =>
+  value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+// "Dr. A|REG123|Dermatologist;Dr. B|REG456|Cosmetologist" -> doctor objects
+const parseDoctorsCell = (value: string) =>
+  value
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [name, regNo, specialization] = entry.split("|").map((p) => (p || "").trim());
+      return { name: name || "", regNo: regNo || "", specialization: specialization || "" };
+    })
+    .filter((doc) => doc.name && doc.regNo && doc.specialization);
+
+// Every column here matches a field on the manual "Create Clinic" form
+// (CreateClinic.tsx) 1:1 — cuc/slug are the only exceptions, since those
+// are always auto-generated, same as on the manual form. Media fields
+// (logo/banner/rateCard/specialOffers/photos/certifications/video) take
+// URLs instead of file uploads, same pattern as the other bulk-upload
+// endpoints in this app.
+router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV or Excel file required" });
+    }
+
+    const ext = req.file.originalname.split(".").pop()?.toLowerCase();
+    if (!ext || !["csv", "xls", "xlsx"].includes(ext)) {
+      fs.unlink(req.file.path, () => undefined);
+      return res.status(400).json({ message: "Only CSV, XLS, or XLSX files are allowed" });
+    }
+
+    const rows = readClinicRows(req.file.path);
+    fs.unlink(req.file.path, () => undefined);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "No rows found in uploaded file" });
+    }
+
+    // Clinic category is stored as a dermaCategory ObjectId, but a bulk row
+    // gives a human-readable name — resolve every distinct name mentioned
+    // anywhere in the file to its _id in one query rather than per row.
+    const allCategories = await ClinicCategory.find({}).select("_id name").lean();
+    const categoryIdByName = new Map(
+      allCategories.map((cat) => [cat.name.trim().toLowerCase(), String(cat._id)])
+    );
+
+    const skipped: { row: number; reason: string }[] = [];
+    const created: unknown[] = [];
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const rowNumber = index + 2;
+
+      const clinicName = getCell(row, ["clinicname", "name"]);
+      const categoryName = getCell(row, ["dermacategory", "clinicategory", "category"]);
+      const contactNumber = normalizeContactNumber(
+        getCell(row, ["contactnumber", "contactno", "contact"])
+      );
+      const whatsapp = normalizeContactNumber(getCell(row, ["whatsapp"]));
+
+      if (!clinicName || !categoryName || !contactNumber || !whatsapp) {
+        skipped.push({
+          row: rowNumber,
+          reason: "Clinic name, category, contact number and WhatsApp number are required",
+        });
+        continue;
+      }
+
+      const categoryId = categoryIdByName.get(categoryName.trim().toLowerCase());
+      if (!categoryId) {
+        skipped.push({ row: rowNumber, reason: `Unknown clinic category: ${categoryName}` });
+        continue;
+      }
+
+      const address = getCell(row, ["address"]);
+      const mapLink = getCell(row, ["maplink", "map"]);
+      const location = extractLatLngFromMapLink(mapLink);
+      const clinicAddresses = buildClinicAddressesFromRequest(
+        {},
+        address,
+        clinicName,
+        contactNumber
+      );
+      const addressText =
+        clinicAddresses[0]?.address || formatClinicAddressText(clinicAddresses[0]) || address;
+
+      const workingOpenTime = getCell(row, ["workingopentime", "opentime"]);
+      const workingCloseTime = getCell(row, ["workingclosetime", "closetime"]);
+      const workingDaysRaw = getCell(row, ["workingdays", "days"]);
+      const offDaysRaw = getCell(row, ["offdays"]);
+      const workingHours = parseWorkingHours({
+        openTime: workingOpenTime,
+        closeTime: workingCloseTime,
+        days: workingDaysRaw ? splitList(workingDaysRaw) : [],
+        offDays: offDaysRaw ? splitList(offDaysRaw) : [],
+      });
+
+      const doctorsRaw = getCell(row, ["doctors"]);
+      const doctors = doctorsRaw ? parseDoctorsCell(doctorsRaw) : [];
+
+      const emailValue = getCell(row, ["email"]);
+
+      const payload: Record<string, unknown> = {
+        cuc: await generateNextClinicCuc(),
+        clinicName,
+        slug: await buildUniqueClinicSlug(clinicName),
+        dermaCategory: categoryId,
+        address: addressText,
+        addresses: clinicAddresses,
+        ...(emailValue ? { email: emailValue } : {}),
+        latitude: location?.latitude || null,
+        longitude: location?.longitude || null,
+        contactNumber,
+        whatsapp,
+        doctors,
+        workingHours,
+        clinicLogo: getCell(row, ["cliniclogo", "logo"]) || undefined,
+        bannerImage: getCell(row, ["bannerimage", "banner"]) || undefined,
+        rateCard: splitList(getCell(row, ["ratecard"])),
+        specialOffers: splitList(getCell(row, ["specialoffers"])),
+        photos: splitList(getCell(row, ["photos"])),
+        certifications: splitList(getCell(row, ["certifications"])),
+        video: getCell(row, ["video"]) || undefined,
+        verifiedBadge: parseBoolean(getCell(row, ["verifiedbadge"]), false),
+        isActive: parseBoolean(getCell(row, ["isactive"]), true),
+        clinicType: getCell(row, ["clinictype"]) || undefined,
+        ownerName: getCell(row, ["ownername"]) || undefined,
+        website: getCell(row, ["website"]) || undefined,
+        city: getCell(row, ["city"]) || undefined,
+        services: getCell(row, ["services"]) || undefined,
+        sector: getCell(row, ["sector"]) || undefined,
+        pincode: getCell(row, ["pincode"]) || undefined,
+        mapLink: mapLink || undefined,
+        clinicDescription: getCell(row, ["clinicdescription", "description"]) || undefined,
+        licenseNo: getCell(row, ["licenseno", "license"]) || undefined,
+        experience: getCell(row, ["experience"]) || undefined,
+        treatmentsAvailable: getCell(row, ["treatmentsavailable"]) || undefined,
+        availableServices: getCell(row, ["availableservices"]) || undefined,
+        consultationFee: getCell(row, ["consultationfee"]) || undefined,
+        bookingMode: getCell(row, ["bookingmode"]) || undefined,
+        instagram: getCell(row, ["instagram"]) || undefined,
+        linkedin: getCell(row, ["linkedin"]) || undefined,
+        facebook: getCell(row, ["facebook"]) || undefined,
+        standardPlanLink: getCell(row, ["standardplanlink"]) || undefined,
+        clinicStatus: getCell(row, ["clinicstatus"]) || "Open",
+      };
+
+      try {
+        const clinic = await Clinic.create(payload);
+        created.push(clinic);
+      } catch (err: any) {
+        let reason = err.message || "Failed to create clinic";
+        if (err?.code === 11000) {
+          const field = Object.keys(err.keyValue || {})[0] || "field";
+          reason = `A clinic with this ${field} already exists (${err.keyValue?.[field]}).`;
+        }
+        skipped.push({ row: rowNumber, reason });
+      }
+    }
+
+    if (!created.length) {
+      return res.status(400).json({
+        message: "No valid clinics found in uploaded file",
+        skipped,
+      });
+    }
+
+    res.status(201).json({
+      message: `${created.length} clinics uploaded successfully`,
+      createdCount: created.length,
+      skipped,
+    });
+  } catch (err: any) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    res.status(400).json({ message: err.message || "Bulk upload failed" });
+  }
+});
+
 /* ================= GET ALL CLINICS ================= */
 
 /* ================= NEARBY CLINICS ================= */
@@ -575,7 +791,7 @@ router.get("/", async (req, res) => {
     if (lightMode) {
       const clinics = await Clinic.find()
         .select(
-          "cuc clinicName slug website contactNumber email dermaCategory address clinicStatus verifiedBadge isActive doctors clinicLogo bannerImage photos workingHours approvalStatus rejectionReason approvedAt createdAt updatedAt"
+          "cuc clinicName slug clinicType ownerName website contactNumber whatsapp email dermaCategory address city services sector pincode mapLink clinicStatus verifiedBadge isActive doctors workingHours clinicLogo bannerImage rateCard specialOffers photos certifications video licenseNo experience treatmentsAvailable availableServices consultationFee bookingMode clinicDescription instagram linkedin facebook standardPlanLink latitude longitude gstNumber addresses approvalStatus rejectionReason approvedAt createdAt updatedAt"
         )
         .populate("dermaCategory", "name")
         .lean();

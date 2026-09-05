@@ -23,7 +23,8 @@
     "multer": "^2.0.2",
     "nodemailer": "^9.0.1",
     "razorpay": "^2.9.6",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.2",

@@ -1,4 +1,7 @@
 import express, { Request, Response } from "express";
+import fs from "fs";
+import * as XLSX from "xlsx";
+import { parseCsvRows } from "../utils/bulkUploadCsv";
 import upload from "../middleware/uploads";
 import Product from "../models/Products";
 
@@ -681,9 +684,214 @@ message:err.message
 );
 
 
+/* ================= BULK CREATE ================= */
 
+const normalizeHeader = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
+// Parses a date-only string as UTC midnight, accepting both "YYYY-MM-DD"
+// and "M/D/YYYY" (with or without leading zeros). Plain `new Date(string)`
+// treats anything other than strict ISO "YYYY-MM-DD" as LOCAL midnight —
+// on a positive-UTC-offset server (e.g. IST) that silently shifts the
+// stored date back a day for "M/D/YYYY" input, so both accepted formats
+// are parsed explicitly here instead of trusting the ambient timezone.
+const parseDateOnly = (value: unknown): Date | undefined => {
+  const str = String(value ?? "").trim();
+  if (!str) return undefined;
 
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  const mdy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    const date = new Date(Date.UTC(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2])));
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  const fallback = new Date(str);
+  return Number.isNaN(fallback.getTime()) ? undefined : fallback;
+};
+
+const getCell = (row: Record<string, unknown>, headers: string[]) => {
+  for (const header of headers) {
+    const foundKey = Object.keys(row).find((key) => normalizeHeader(key) === header);
+    if (foundKey) {
+      const raw = row[foundKey];
+      // A cell XLSX parsed as a date (cellDates:true) comes back as a Date
+      // object — stringify it as ISO rather than via Date#toString(), which
+      // is locale/timezone-formatted text that isn't reliably re-parseable.
+      if (raw instanceof Date) return raw.toISOString();
+      return String(raw ?? "").trim();
+    }
+  }
+  return "";
+};
+
+const setIfPresent = (payload: Record<string, unknown>, key: string, value: string) => {
+  if (value) payload[key] = value;
+};
+
+const parseBoolCell = (value: string) =>
+  ["true", "yes", "y", "1", "in stock", "active"].includes(value.trim().toLowerCase());
+
+const readProductRows = (filePath: string) => {
+  if (filePath.toLowerCase().endsWith(".csv")) {
+    return parseCsvRows(fs.readFileSync(filePath));
+  }
+  // cellDates:true — converts a genuine Excel date-serial cell into a JS
+  // Date instead of a raw serial number.
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+    defval: "",
+  });
+};
+
+router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV or Excel file required" });
+    }
+
+    const ext = req.file.originalname.split(".").pop()?.toLowerCase();
+    if (!ext || !["csv", "xls", "xlsx"].includes(ext)) {
+      fs.unlink(req.file.path, () => undefined);
+      return res.status(400).json({ message: "Only CSV, XLS, or XLSX files are allowed" });
+    }
+
+    const rows = readProductRows(req.file.path);
+    fs.unlink(req.file.path, () => undefined);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "No rows found in uploaded file" });
+    }
+
+    const skipped: { row: number; reason: string }[] = [];
+    const created: unknown[] = [];
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const rowNumber = index + 2;
+
+      const payload: Record<string, unknown> = {
+        productName: getCell(row, ["productname", "name"]),
+      };
+
+      const categoryRaw = getCell(row, [
+        "category",
+        "categories",
+        "categoryname",
+        "productcategory",
+        "productcategories",
+      ]);
+      payload.category = categoryRaw
+        ? categoryRaw.split(",").map((c) => c.trim()).filter(Boolean)
+        : [];
+
+      payload.discountedPrice = getCell(row, ["discountedprice", "price", "sellingprice"]);
+      payload.mrpPrice = getCell(row, ["mrpprice", "mrp"]);
+      payload.discountPercent = getCell(row, ["discountpercent", "discount"]);
+      payload.taxPercent = getCell(row, ["taxpercent", "gst", "tax"]);
+
+      setIfPresent(payload, "brandName", getCell(row, ["brandname", "brand"]));
+      setIfPresent(payload, "description", getCell(row, ["description"]));
+      setIfPresent(payload, "ingredients", getCell(row, ["ingredients"]));
+      setIfPresent(payload, "targetConcerns", getCell(row, ["targetconcerns", "concerns"]));
+      setIfPresent(
+        payload,
+        "usageInstructions",
+        getCell(row, ["usageinstructions", "usage"])
+      );
+      setIfPresent(payload, "benefits", getCell(row, ["benefits"]));
+      setIfPresent(payload, "certifications", getCell(row, ["certifications"]));
+      setIfPresent(payload, "netQuantity", getCell(row, ["netquantity", "quantity"]));
+      setIfPresent(payload, "quantityUnit", getCell(row, ["quantityunit", "unit"]));
+      setIfPresent(payload, "hsnCode", getCell(row, ["hsncode", "hsn"]));
+      const expiryDateRaw = getCell(row, ["expirydate", "expiry"]);
+      if (expiryDateRaw) {
+        const parsedExpiry = parseDateOnly(expiryDateRaw);
+        if (parsedExpiry) payload.expiryDate = parsedExpiry;
+      }
+      setIfPresent(
+        payload,
+        "manufacturerName",
+        getCell(row, ["manufacturername", "manufacturer"])
+      );
+      setIfPresent(
+        payload,
+        "licenseNumber",
+        getCell(row, ["licensenumber", "license", "fssai"])
+      );
+      setIfPresent(payload, "packagingType", getCell(row, ["packagingtype", "packaging"]));
+      setIfPresent(
+        payload,
+        "productShortVideo",
+        getCell(row, ["productshortvideo", "videourl", "video"])
+      );
+      setIfPresent(payload, "skinHairType", getCell(row, ["skinhairtype", "skintype"]));
+      setIfPresent(payload, "barcode", getCell(row, ["barcode", "sku"]));
+      setIfPresent(payload, "gender", getCell(row, ["gender"]));
+
+      const stockStatusRaw = getCell(row, ["stockstatus", "instock"]);
+      if (stockStatusRaw) {
+        payload.stockStatus = parseBoolCell(stockStatusRaw) ? "In Stock" : "Out of Stock";
+      }
+
+      const activeStatusRaw = getCell(row, ["activestatus", "active"]);
+      if (activeStatusRaw) payload.activeStatus = parseBoolCell(activeStatusRaw);
+
+      const dermRecommendedRaw = getCell(row, [
+        "dermatologistrecommended",
+        "dermrecommended",
+      ]);
+      if (dermRecommendedRaw) payload.dermatologistRecommended = parseBoolCell(dermRecommendedRaw);
+
+      const imagesRaw = getCell(row, ["productimages", "images", "imageurl"]);
+      if (imagesRaw) {
+        payload.productImages = imagesRaw.split(",").map((v) => v.trim()).filter(Boolean);
+      }
+
+      normalizeNumericFields(payload);
+
+      const validationError = validateProductPayload(payload, true);
+      if (validationError) {
+        skipped.push({ row: rowNumber, reason: validationError.message });
+        continue;
+      }
+
+      try {
+        payload.productSKU = await generateProductSKU();
+        const product = await Product.create(payload);
+        created.push(product);
+      } catch (err: any) {
+        skipped.push({ row: rowNumber, reason: err.message || "Failed to create product" });
+      }
+    }
+
+    if (!created.length) {
+      return res.status(400).json({
+        message: "No valid products found in uploaded file",
+        skipped,
+      });
+    }
+
+    res.status(201).json({
+      message: `${created.length} products uploaded successfully`,
+      createdCount: created.length,
+      skipped,
+    });
+  } catch (err: any) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    res.status(400).json({ message: err.message || "Bulk upload failed" });
+  }
+});
 
 
 /* ================= GET ALL ================= */

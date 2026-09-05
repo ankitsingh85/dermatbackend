@@ -280,4 +280,25 @@ router.patch("/:id/status", optionalBusinessAuth, async (req: BusinessAuthReques
   }
 });
 
+/** ✅ ADMIN: delete a ticket (no auth token sent, matching this app's
+ * admin-route convention — see the other routes in this file). */
+router.delete("/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid ticket id" });
+    }
+
+    const deleted = await SupportTicket.findByIdAndDelete(id);
+    if (!deleted) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    return res.json({ message: "Ticket deleted" });
+  } catch (err: any) {
+    console.error("Delete ticket error:", err);
+    return res.status(500).json({ message: "Failed to delete ticket", error: err.message });
+  }
+});
+
 export default router;

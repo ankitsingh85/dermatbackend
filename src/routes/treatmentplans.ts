@@ -1,5 +1,8 @@
 import express from "express";
 import mongoose from "mongoose";
+import fs from "fs";
+import * as XLSX from "xlsx";
+import { parseCsvRows } from "../utils/bulkUploadCsv";
 import upload from "../middleware/uploads";
 import Clinic from "../models/clinic";
 import TreatmentPlan from "../models/treatmentplans";
@@ -388,6 +391,215 @@ JSON.parse(serviceCategory),
     }
   }
 );
+
+/* ================= BULK UPLOAD ================= */
+
+const normalizeHeader = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const getCell = (row: Record<string, unknown>, headers: string[]) => {
+  for (const header of headers) {
+    const foundKey = Object.keys(row).find((key) => normalizeHeader(key) === header);
+    if (foundKey) return String(row[foundKey] ?? "").trim();
+  }
+  return "";
+};
+
+const splitList = (value: string) =>
+  value
+    ? value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+
+const readTreatmentPlanRows = (filePath: string) => {
+  if (filePath.toLowerCase().endsWith(".csv")) {
+    return parseCsvRows(fs.readFileSync(filePath));
+  }
+  // cellDates:true — converts a genuine Excel date-serial cell into a JS
+  // Date instead of a raw serial number.
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+    defval: "",
+  });
+};
+
+router.post("/bulk-upload", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "CSV or Excel file required" });
+    }
+
+    const ext = req.file.originalname.split(".").pop()?.toLowerCase();
+    if (!ext || !["csv", "xls", "xlsx"].includes(ext)) {
+      fs.unlink(req.file.path, () => undefined);
+      return res.status(400).json({ message: "Only CSV, XLS, or XLSX files are allowed" });
+    }
+
+    const rows = readTreatmentPlanRows(req.file.path);
+    fs.unlink(req.file.path, () => undefined);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "No rows found in uploaded file" });
+    }
+
+    const clinics = await Clinic.find({}, "clinicName");
+    const clinicIdByName = new Map<string, string>();
+    for (const clinicDoc of clinics as any[]) {
+      if (clinicDoc.clinicName) {
+        clinicIdByName.set(String(clinicDoc.clinicName).trim().toLowerCase(), String(clinicDoc._id));
+      }
+    }
+
+    const skipped: { row: number; reason: string }[] = [];
+    const created: unknown[] = [];
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
+      const rowNumber = index + 2;
+
+      const treatmentName = getCell(row, ["treatmentname", "name"]);
+      const clinicCell = getCell(row, ["clinic", "clinics", "clinicnames"]);
+      const description = getCell(row, ["description"]);
+      const shortReelUrl = getCell(row, ["shortreelurl", "reelurl"]);
+      const serviceCategoryCell = getCell(row, ["servicecategory", "servicecategories", "category", "categories"]);
+      const mrp = getCell(row, ["mrp"]);
+      const offerPrice = getCell(row, ["offerprice", "price"]);
+      const pricePerSession = getCell(row, ["pricepersession"]);
+      const discountPercent = getCell(row, ["discountpercent", "discount"]);
+      const sessions = getCell(row, ["sessions", "noofsessions"]);
+      const duration = getCell(row, ["duration"]);
+      const validity = getCell(row, ["validity"]);
+      const technologyUsed = getCell(row, ["technologyused", "technology"]);
+      const genderCell = getCell(row, ["gender"]);
+      const promoCode = getCell(row, ["promocode"]);
+      const addToCartCell = getCell(row, ["addtocart"]);
+      const isActiveCell = getCell(row, ["isactive", "active"]);
+      const treatmentImagesCell = getCell(row, ["treatmentimages", "images"]);
+      const beforeImagesCell = getCell(row, ["beforeimages"]);
+      const afterImagesCell = getCell(row, ["afterimages"]);
+
+      if (!treatmentName) {
+        skipped.push({ row: rowNumber, reason: "Treatment plan name is required" });
+        continue;
+      }
+      if (!textOnlyRegex.test(treatmentName)) {
+        skipped.push({
+          row: rowNumber,
+          reason: "Treatment plan name should contain only letters and spaces",
+        });
+        continue;
+      }
+      if (!serviceCategoryCell) {
+        skipped.push({ row: rowNumber, reason: "Treatment category is required" });
+        continue;
+      }
+      if (!offerPrice) {
+        skipped.push({
+          row: rowNumber,
+          reason: `${friendlyNumericFieldNames.offerPrice} is required`,
+        });
+        continue;
+      }
+
+      const numericValues: Record<string, string> = { mrp, offerPrice, discountPercent, sessions };
+      let numericError = "";
+      for (const [field, value] of Object.entries(numericValues)) {
+        if (value && !digitsOnlyRegex.test(value)) {
+          numericError = `${friendlyNumericFieldNames[field] || field} must contain digits only`;
+          break;
+        }
+      }
+      if (numericError) {
+        skipped.push({ row: rowNumber, reason: numericError });
+        continue;
+      }
+
+      if (pricePerSession && Number.isNaN(Number(pricePerSession))) {
+        skipped.push({ row: rowNumber, reason: "pricePerSession must be a valid number" });
+        continue;
+      }
+
+      if (shortReelUrl && !isValidUrl(shortReelUrl)) {
+        skipped.push({ row: rowNumber, reason: "Treatment short reel must be a valid URL" });
+        continue;
+      }
+
+      const clinicNames = splitList(clinicCell);
+      const clinicIds: string[] = [];
+      let clinicNotFound = "";
+      for (const name of clinicNames) {
+        const id = clinicIdByName.get(name.toLowerCase());
+        if (!id) {
+          clinicNotFound = name;
+          break;
+        }
+        clinicIds.push(id);
+      }
+      if (clinicNotFound) {
+        skipped.push({ row: rowNumber, reason: `Clinic "${clinicNotFound}" not found` });
+        continue;
+      }
+
+      const serviceCategoryArray = splitList(serviceCategoryCell);
+      const genderValue = ["Unisex", "Male", "Female"].includes(genderCell) ? genderCell : "Unisex";
+
+      try {
+        const tuc = await generateTreatmentCode();
+        const slug = await buildUniqueTreatmentSlug(treatmentName);
+        const plan = await TreatmentPlan.create({
+          tuc,
+          treatmentName,
+          slug,
+          clinic: clinicIds,
+          description,
+          shortReelUrl,
+          serviceCategory: serviceCategoryArray,
+          mrp: parseNumber(mrp),
+          offerPrice: parseNumber(offerPrice),
+          pricePerSession: parseNumber(pricePerSession),
+          discountPercent: parseNumber(discountPercent),
+          sessions: sessions || undefined,
+          duration,
+          validity,
+          technologyUsed,
+          gender: genderValue,
+          promoCode,
+          addToCart: parseBoolean(addToCartCell, true),
+          isActive: parseBoolean(isActiveCell, true),
+          treatmentImages: splitList(treatmentImagesCell),
+          beforeImages: splitList(beforeImagesCell),
+          afterImages: splitList(afterImagesCell),
+        });
+        created.push(plan);
+      } catch (err: any) {
+        skipped.push({ row: rowNumber, reason: err.message || "Failed to create treatment plan" });
+      }
+    }
+
+    if (!created.length) {
+      return res.status(400).json({
+        message: "No valid treatment plans found in uploaded file",
+        skipped,
+      });
+    }
+
+    res.status(201).json({
+      message: `${created.length} treatment plans uploaded successfully`,
+      createdCount: created.length,
+      skipped,
+    });
+  } catch (err: any) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    res.status(400).json({ message: err.message || "Bulk upload failed" });
+  }
+});
 
 router.get("/", async (req, res) => {
   try {
