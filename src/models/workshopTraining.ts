@@ -127,7 +127,6 @@ const WorkshopTrainingSchema = new Schema<WorkshopTrainingDocument>(
     trainerExperience: { type: String, trim: true },
     languageOfDelivery: {
       type: String,
-      enum: ["English", "Hindi", "Bilingual"],
     },
     whatsIncluded: { type: String, trim: true },
     whatsNotIncluded: { type: String, trim: true },

@@ -35,6 +35,7 @@ export interface IB2BProduct {
   licenseNumber?: string;
   mrp?: number;
   discountedPrice: number;
+  discountPercent?: number;
   gst: number;
   taxIncluded: boolean;
 
@@ -136,6 +137,7 @@ const B2BProductSchema = new Schema<B2BProductDocument>(
     },
     mrp: { type: Number, min: 0 },
     discountedPrice: { type: Number, required: true, min: 0 },
+    discountPercent: { type: Number, min: 0, max: 100 },
 
     // GST is now a free-form percentage (0-100). The frontend still offers
     // common presets via a dropdown, plus a "Custom" option that reveals a

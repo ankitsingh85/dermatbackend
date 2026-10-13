@@ -377,49 +377,47 @@ router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Res
       const availabilityEndTimeCell = getCell(row, ["availabilityendtime", "endtime"]);
       const imageUrl = getCell(row, ["imageurl", "image", "serviceimage"]);
 
+      // Collect every failing check instead of returning on the first one,
+      // so a row can report all of its problems in one pass.
+      const rowErrors: string[] = [];
+
       if (!serviceType) {
-        skipped.push({ row: rowNumber, reason: "Service type is required" });
-        continue;
+        rowErrors.push("Service type is required");
       }
 
       if (!imageUrl) {
-        skipped.push({ row: rowNumber, reason: "Service image is required" });
-        continue;
+        rowErrors.push("Service image is required");
       }
 
       const feeValue = Number(consultationFeeCell);
       if (!consultationFeeCell || Number.isNaN(feeValue) || feeValue < 0) {
-        skipped.push({ row: rowNumber, reason: "Enter a valid consultation fee" });
-        continue;
+        rowErrors.push("Enter a valid consultation fee");
       }
 
       const doctorRefs = splitList(doctorsCell);
       if (doctorRefs.length === 0) {
-        skipped.push({ row: rowNumber, reason: "Please select at least one doctor" });
-        continue;
+        rowErrors.push("Please select at least one doctor");
       }
 
       const doctorIds: string[] = [];
-      let doctorNotFound = "";
+      const doctorsNotFound: string[] = [];
       for (const ref of doctorRefs) {
         const id = resolveDoctorId(ref);
         if (!id) {
-          doctorNotFound = ref;
-          break;
+          doctorsNotFound.push(ref);
+        } else {
+          doctorIds.push(id);
         }
-        doctorIds.push(id);
       }
-      if (doctorNotFound) {
-        skipped.push({ row: rowNumber, reason: `Doctor "${doctorNotFound}" not found` });
-        continue;
+      if (doctorsNotFound.length) {
+        rowErrors.push(`Doctor(s) not found: ${doctorsNotFound.join(", ")}`);
       }
 
       let offerPriceValue: number | undefined;
       if (offerPriceCell) {
         offerPriceValue = Number(offerPriceCell);
         if (Number.isNaN(offerPriceValue) || offerPriceValue < 0) {
-          skipped.push({ row: rowNumber, reason: "Enter a valid offer price" });
-          continue;
+          rowErrors.push("Enter a valid offer price");
         }
       }
 
@@ -427,29 +425,29 @@ router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Res
       if (discountPercentCell) {
         discountPercentValue = Number(discountPercentCell);
         if (Number.isNaN(discountPercentValue) || discountPercentValue < 0 || discountPercentValue > 100) {
-          skipped.push({ row: rowNumber, reason: "Discount % must be between 0 and 100" });
-          continue;
+          rowErrors.push("Discount % must be between 0 and 100");
         }
       }
 
       const startTimeResult = validateTimeField(availabilityStartTimeCell || undefined);
       if (startTimeResult.error) {
-        skipped.push({ row: rowNumber, reason: startTimeResult.error });
-        continue;
+        rowErrors.push(startTimeResult.error);
       }
       const endTimeResult = validateTimeField(availabilityEndTimeCell || undefined);
       if (endTimeResult.error) {
-        skipped.push({ row: rowNumber, reason: endTimeResult.error });
-        continue;
+        rowErrors.push(endTimeResult.error);
       }
       if (
-        (startTimeResult.value && !endTimeResult.value) ||
-        (!startTimeResult.value && endTimeResult.value)
+        !startTimeResult.error &&
+        !endTimeResult.error &&
+        ((startTimeResult.value && !endTimeResult.value) ||
+          (!startTimeResult.value && endTimeResult.value))
       ) {
-        skipped.push({
-          row: rowNumber,
-          reason: "Set both a start and end time, or leave both blank",
-        });
+        rowErrors.push("Set both a start and end time, or leave both blank");
+      }
+
+      if (rowErrors.length) {
+        skipped.push({ row: rowNumber, reason: rowErrors.join("; ") });
         continue;
       }
 

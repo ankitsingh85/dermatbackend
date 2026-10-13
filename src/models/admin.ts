@@ -30,6 +30,8 @@ export const ADMIN_MODULES = [
   "serviceCategory",
   "treatment",
   "onlineConsultationService",
+  "coupon",
+  "clinicSubscription",
   // Groups the "OTHERS" sidebar dropdown (Top Products, Offers,
   // Featured Section, Shorts, Hiring Requests) under a single permission toggle.
   "others",
@@ -57,6 +59,8 @@ export const ADMIN_MODULE_LABELS: Record<string, string> = {
   serviceCategory: "Treatment Category",
   treatment: "Treatment Plans",
   onlineConsultationService: "Online Consultation Services",
+  coupon: "Coupon",
+  clinicSubscription: "Clinic Subscription Plan",
   others: "Others (Top Products, Offers, Featured Section, Shorts, Hiring Requests)",
 };
 

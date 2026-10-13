@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import Order from "../models/order";
+import Coupon from "../models/coupon";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
 // import UserProfile from "../models/userinformation";
 
@@ -117,6 +118,8 @@ router.post("/", async (req, res) => {
       b2bUserId,
       products,
       totalAmount,
+      couponCode,
+      discountAmount,
       address,
       orderType,
       ownerType,
@@ -154,6 +157,8 @@ router.post("/", async (req, res) => {
       ownerType: resolvedOwnerType,
       products,
       totalAmount,
+      couponCode: couponCode ? String(couponCode).trim().toUpperCase() : undefined,
+      discountAmount: discountAmount || undefined,
       address,
       orderType: normalizeOrderType(orderType),
       paymentStatus: "success",
@@ -163,6 +168,16 @@ router.post("/", async (req, res) => {
     });
 
     const savedOrder = await order.save();
+
+    // Record usage against the coupon itself so admin-side reporting and
+    // the usageLimit check both reflect it. Best-effort — a coupon-tracking
+    // hiccup should never block an already-paid order from saving.
+    if (savedOrder.couponCode) {
+      Coupon.updateOne({ couponCode: savedOrder.couponCode }, { $inc: { timesUsed: 1 } }).catch(
+        (err) => console.error("Failed to record coupon usage:", err)
+      );
+    }
+
     res.status(201).json(savedOrder);
   } catch (err: any) {
     console.error("❌ Error creating order:", err.message);

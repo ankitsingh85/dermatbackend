@@ -151,12 +151,11 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
       const name = getCell(row, ["name", "trainingtypename", "trainingtype"]);
       const imageUrl = getCell(row, ["imageurl", "image", "trainingtypeimage"]);
 
-      if (!name) {
-        skipped.push({ row: rowNumber, reason: "Training type name is required" });
-        continue;
-      }
-      if (!imageUrl) {
-        skipped.push({ row: rowNumber, reason: "Image URL is required" });
+      const rowErrors: string[] = [];
+      if (!name) rowErrors.push("Training type name is required");
+      if (!imageUrl) rowErrors.push("Image URL is required");
+      if (rowErrors.length) {
+        skipped.push({ row: rowNumber, reason: rowErrors.join("; ") });
         continue;
       }
 

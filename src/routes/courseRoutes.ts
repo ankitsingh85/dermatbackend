@@ -317,13 +317,15 @@ const validateCoursePayload = (
   payload: Record<string, unknown>,
   isCreate = false,
 ) => {
+  // Collect every failing check instead of returning on the first one, so
+  // a row (or the manual form) can report all of its problems in one pass.
+  const errors: string[] = [];
+
   const requiredTextFields = ["courseName", "instituteName"] as const;
 
   for (const field of requiredTextFields) {
     if (isCreate && !stripHtml(payload[field])) {
-      return {
-        message: `${String(field).replace(/([A-Z])/g, " $1")} is required`,
-      };
+      errors.push(`${String(field).replace(/([A-Z])/g, " $1")} is required`);
     }
   }
 
@@ -333,14 +335,12 @@ const validateCoursePayload = (
       payload.netFeesInr === null ||
       payload.netFeesInr === "")
   ) {
-    return { message: "Net fees inr is required" };
+    errors.push("Net fees inr is required");
   }
 
   for (const field of dateFields) {
     if (payload[field] === "INVALID_DATE") {
-      return {
-        message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid date`,
-      };
+      errors.push(`${String(field).replace(/([A-Z])/g, " $1")} must be a valid date`);
     }
   }
 
@@ -348,17 +348,14 @@ const validateCoursePayload = (
     payload.instituteName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.instituteName))
   ) {
-    return { message: "Institute name should contain only letters and spaces" };
+    errors.push("Institute name should contain only letters and spaces");
   }
 
   if (
     payload.trainerInstructorName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.trainerInstructorName))
   ) {
-    return {
-      message:
-        "Trainer / instructor name should contain only letters and spaces",
-    };
+    errors.push("Trainer / instructor name should contain only letters and spaces");
   }
 
   const numberFieldsIfProvided = [
@@ -372,22 +369,19 @@ const validateCoursePayload = (
     if (payload[field] === undefined) continue;
 
     if (Number.isNaN(Number(payload[field]))) {
-      return {
-        message: `${String(field).replace(/([A-Z])/g, " $1")} must be a valid number`,
-      };
+      errors.push(`${String(field).replace(/([A-Z])/g, " $1")} must be a valid number`);
+      continue;
     }
 
     if (!Number.isInteger(Number(payload[field]))) {
-      return {
-        message: `${String(field).replace(/([A-Z])/g, " $1")} must contain digits only`,
-      };
+      errors.push(`${String(field).replace(/([A-Z])/g, " $1")} must contain digits only`);
     }
 
     if (
       field === "discountPercent" &&
       (Number(payload[field]) < 0 || Number(payload[field]) > 100)
     ) {
-      return { message: "Discount % must be between 0 and 100" };
+      errors.push("Discount % must be between 0 and 100");
     }
   }
 
@@ -395,31 +389,31 @@ const validateCoursePayload = (
     payload.mobileNo !== undefined &&
     !digitsOnlyRegex.test(String(payload.mobileNo))
   ) {
-    return { message: "Mobile number must contain digits only" };
+    errors.push("Mobile number must contain digits only");
   }
 
   if (
     payload.mobileNo !== undefined &&
     String(payload.mobileNo).trim().length !== 10
   ) {
-    return { message: "Mobile number must be exactly 10 digits" };
+    errors.push("Mobile number must be exactly 10 digits");
   }
 
   if (
     payload.courseDemoVideo !== undefined &&
     !isValidYoutubeUrl(payload.courseDemoVideo)
   ) {
-    return { message: "Course demo video must be a valid YouTube link" };
+    errors.push("Course demo video must be a valid YouTube link");
   }
 
   if (
     payload.targetAudience !== undefined &&
     !Array.isArray(payload.targetAudience)
   ) {
-    return { message: "Target audience must be a valid list" };
+    errors.push("Target audience must be a valid list");
   }
 
-  return null;
+  return errors.length ? { message: errors.join("; ") } : null;
 };
 
 router.get(

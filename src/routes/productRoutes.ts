@@ -335,7 +335,9 @@ isCreate=false
 
 )=>{
 
-
+// Collect every failing check instead of returning on the first one, so
+// a row (or the manual form) can report all of its problems in one pass.
+const errors: string[] = [];
 
 /* CATEGORY CHECK */
 
@@ -349,9 +351,7 @@ payload.category.length===0
 )
 ){
 
-return {
-message:"At least one category required"
-};
+errors.push("At least one category required");
 
 }
 
@@ -380,12 +380,7 @@ isCreate &&
 !stripHtml(payload[field])
 ){
 
-return {
-
-message:
-`${friendlyFieldNames[field]} is required`
-
-};
+errors.push(`${friendlyFieldNames[field]} is required`);
 
 
 }
@@ -404,9 +399,7 @@ payload.discountedPrice === null
 )
 ){
 
-return {
-message:`${friendlyFieldNames.discountedPrice} is required`
-};
+errors.push(`${friendlyFieldNames.discountedPrice} is required`);
 
 }
 
@@ -415,9 +408,7 @@ payload.discountedPrice !== undefined &&
 Number.isNaN(Number(payload.discountedPrice))
 ){
 
-return {
-message:`${friendlyFieldNames.discountedPrice} must be a valid number`
-};
+errors.push(`${friendlyFieldNames.discountedPrice} must be a valid number`);
 
 }
 
@@ -430,23 +421,6 @@ message:`${friendlyFieldNames.discountedPrice} must be a valid number`
 /* TEXT VALIDATIONS */
 
 
-if(
-payload.productName &&
-!textOnlyRegex.test(
-stripHtml(payload.productName)
-)
-){
-
-return {
-message:
-"Product name letters only"
-};
-
-}
-
-
-
-
 
 if(
 payload.brandName &&
@@ -455,10 +429,7 @@ stripHtml(payload.brandName)
 )
 ){
 
-return {
-message:
-"Brand name letters only"
-};
+errors.push("Brand name letters only");
 
 }
 
@@ -492,10 +463,7 @@ payload.productShortVideo
 )
 ){
 
-return {
-message:
-"Invalid video URL"
-};
+errors.push("Invalid video URL");
 
 }
 
@@ -523,7 +491,7 @@ message:
 
 
 
-return null;
+return errors.length ? { message: errors.join("; ") } : null;
 
 
 };

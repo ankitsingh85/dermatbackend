@@ -8,6 +8,7 @@ const router = express.Router();
 
 const REQUIRED_WIDTH = 473;
 const REQUIRED_HEIGHT = 300;
+const MAX_FEATURED_ITEMS = 3;
 
 const getUploadedPath = (file?: Express.Multer.File) =>
   file ? `/uploads/${file.filename}` : "";
@@ -161,6 +162,14 @@ router.post("/", upload.single("image"), async (req: Request, res: Response) => 
     if (!heading) {
       await deleteStoredFile(getUploadedPath(file));
       return res.status(400).json({ message: "Heading is required" });
+    }
+
+    const existingCount = await FeaturedSection.countDocuments();
+    if (existingCount >= MAX_FEATURED_ITEMS) {
+      await deleteStoredFile(getUploadedPath(file));
+      return res.status(400).json({
+        message: `Only ${MAX_FEATURED_ITEMS} featured images are allowed. Delete one before uploading a new one.`,
+      });
     }
 
     await validateFeaturedImage(file);

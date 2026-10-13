@@ -485,65 +485,54 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
       const beforeImagesCell = getCell(row, ["beforeimages"]);
       const afterImagesCell = getCell(row, ["afterimages"]);
 
+      // Collect every failing check instead of returning on the first one,
+      // so a row can report all of its problems in one pass.
+      const rowErrors: string[] = [];
+
       if (!treatmentName) {
-        skipped.push({ row: rowNumber, reason: "Treatment plan name is required" });
-        continue;
-      }
-      if (!textOnlyRegex.test(treatmentName)) {
-        skipped.push({
-          row: rowNumber,
-          reason: "Treatment plan name should contain only letters and spaces",
-        });
-        continue;
+        rowErrors.push("Treatment plan name is required");
+      } else if (!textOnlyRegex.test(treatmentName)) {
+        rowErrors.push("Treatment plan name should contain only letters and spaces");
       }
       if (!serviceCategoryCell) {
-        skipped.push({ row: rowNumber, reason: "Treatment category is required" });
-        continue;
+        rowErrors.push("Treatment category is required");
       }
       if (!offerPrice) {
-        skipped.push({
-          row: rowNumber,
-          reason: `${friendlyNumericFieldNames.offerPrice} is required`,
-        });
-        continue;
+        rowErrors.push(`${friendlyNumericFieldNames.offerPrice} is required`);
       }
 
       const numericValues: Record<string, string> = { mrp, offerPrice, discountPercent, sessions };
-      let numericError = "";
       for (const [field, value] of Object.entries(numericValues)) {
         if (value && !digitsOnlyRegex.test(value)) {
-          numericError = `${friendlyNumericFieldNames[field] || field} must contain digits only`;
-          break;
+          rowErrors.push(`${friendlyNumericFieldNames[field] || field} must contain digits only`);
         }
-      }
-      if (numericError) {
-        skipped.push({ row: rowNumber, reason: numericError });
-        continue;
       }
 
       if (pricePerSession && Number.isNaN(Number(pricePerSession))) {
-        skipped.push({ row: rowNumber, reason: "pricePerSession must be a valid number" });
-        continue;
+        rowErrors.push("pricePerSession must be a valid number");
       }
 
       if (shortReelUrl && !isValidUrl(shortReelUrl)) {
-        skipped.push({ row: rowNumber, reason: "Treatment short reel must be a valid URL" });
-        continue;
+        rowErrors.push("Treatment short reel must be a valid URL");
       }
 
       const clinicNames = splitList(clinicCell);
       const clinicIds: string[] = [];
-      let clinicNotFound = "";
+      const clinicsNotFound: string[] = [];
       for (const name of clinicNames) {
         const id = clinicIdByName.get(name.toLowerCase());
         if (!id) {
-          clinicNotFound = name;
-          break;
+          clinicsNotFound.push(name);
+        } else {
+          clinicIds.push(id);
         }
-        clinicIds.push(id);
       }
-      if (clinicNotFound) {
-        skipped.push({ row: rowNumber, reason: `Clinic "${clinicNotFound}" not found` });
+      if (clinicsNotFound.length) {
+        rowErrors.push(`Clinic(s) not found: ${clinicsNotFound.join(", ")}`);
+      }
+
+      if (rowErrors.length) {
+        skipped.push({ row: rowNumber, reason: rowErrors.join("; ") });
         continue;
       }
 

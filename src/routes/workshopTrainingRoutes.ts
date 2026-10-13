@@ -3,7 +3,7 @@ import fs from "fs";
 import * as XLSX from "xlsx";
 import { parseCsvRows } from "../utils/bulkUploadCsv";
 import upload from "../middleware/uploads";
-import WorkshopTraining from "../models/workshopTraining";
+import WorkshopTraining from "../models/workshoptraining";
 
 const router = express.Router();
 
@@ -311,9 +311,13 @@ const validatePayload = (
     maximumSeatsBatchSize: "Maximum Seats / Batch Size",
   };
 
+  // Collect every failing check instead of returning on the first one, so
+  // a row (or the manual form) can report all of its problems in one pass.
+  const errors: string[] = [];
+
   for (const field of requiredTextFields) {
     if (isCreate && !stripHtml(payload[field])) {
-      return { message: `${labelMap[field] || field} is required` };
+      errors.push(`${labelMap[field] || field} is required`);
     }
   }
 
@@ -323,7 +327,7 @@ const validatePayload = (
       payload.netFeesInr === null ||
       payload.netFeesInr === "")
   ) {
-    return { message: `${labelMap.netFeesInr} is required` };
+    errors.push(`${labelMap.netFeesInr} is required`);
   }
 
   for (const field of [
@@ -332,7 +336,7 @@ const validatePayload = (
     "registrationDeadline",
   ] as const) {
     if (payload[field] === "INVALID_DATE") {
-      return { message: `${labelMap[field]} must be a valid date` };
+      errors.push(`${labelMap[field]} must be a valid date`);
     }
   }
 
@@ -340,17 +344,14 @@ const validatePayload = (
     payload.instituteName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.instituteName))
   ) {
-    return { message: "Institute name should contain only letters and spaces" };
+    errors.push("Institute name should contain only letters and spaces");
   }
 
   if (
     payload.trainerInstructorName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.trainerInstructorName))
   ) {
-    return {
-      message:
-        "Trainer / instructor name should contain only letters and spaces",
-    };
+    errors.push("Trainer / instructor name should contain only letters and spaces");
   }
 
   const numberFieldsIfProvided = [
@@ -363,18 +364,17 @@ const validatePayload = (
   for (const field of numberFieldsIfProvided) {
     if (payload[field] === undefined) continue;
     if (Number.isNaN(Number(payload[field]))) {
-      return { message: `${labelMap[field] || field} must be a valid number` };
+      errors.push(`${labelMap[field] || field} must be a valid number`);
+      continue;
     }
     if (!Number.isInteger(Number(payload[field]))) {
-      return {
-        message: `${labelMap[field] || field} must contain digits only`,
-      };
+      errors.push(`${labelMap[field] || field} must contain digits only`);
     }
     if (
       field === "discountPercent" &&
       (Number(payload[field]) < 0 || Number(payload[field]) > 100)
     ) {
-      return { message: "Discount % must be between 0 and 100" };
+      errors.push("Discount % must be between 0 and 100");
     }
   }
 
@@ -382,7 +382,7 @@ const validatePayload = (
     payload.targetAudience !== undefined &&
     !Array.isArray(payload.targetAudience)
   ) {
-    return { message: "Target audience must be a valid list" };
+    errors.push("Target audience must be a valid list");
   }
 
   if (
@@ -398,28 +398,17 @@ const validatePayload = (
       }
     })()
   ) {
-    return { message: "Course demo video must be a valid YouTube link" };
+    errors.push("Course demo video must be a valid YouTube link");
   }
 
   if (
     payload.certificationProvided !== undefined &&
     !["Yes", "No"].includes(String(payload.certificationProvided))
   ) {
-    return { message: "Certification provided must be Yes or No" };
+    errors.push("Certification provided must be Yes or No");
   }
 
-  if (
-    payload.languageOfDelivery !== undefined &&
-    !["English", "Hindi", "Bilingual"].includes(
-      String(payload.languageOfDelivery),
-    )
-  ) {
-    return {
-      message: "Language of delivery must be English, Hindi, or Bilingual",
-    };
-  }
-
-  return null;
+  return errors.length ? { message: errors.join("; ") } : null;
 };
 
 router.get("/next-code", async (_req: Request, res: Response) => {

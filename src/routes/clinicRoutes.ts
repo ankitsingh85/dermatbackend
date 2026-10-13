@@ -8,6 +8,7 @@ import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
 import B2BUser from "../models/B2BUser";
 import Order from "../models/order";
+import { getActiveSubscriptionClinicIds, resolveOverride } from "../utils/clinicSubscriptionAccess";
 import {
   buildClinicAddressFromText,
   formatClinicAddressText,
@@ -314,6 +315,24 @@ const stripHeavyClinicFields = (clinic: any) => {
   return clone;
 };
 
+/* ================= SUBSCRIPTION-GATED PERKS =================
+   The WhatsApp button, verified badge, and Lead dashboard access are all
+   only shown/enabled when the clinic has an active subscription — unless
+   admin has manually forced that specific perk on/off via its override
+   field, which always wins. */
+const attachSubscriptionFlags = async (clinics: any[]) => {
+  const ids = clinics.map((clinic) => String(clinic._id));
+  const activeSet = await getActiveSubscriptionClinicIds(ids);
+  return clinics.map((clinic) => {
+    const hasActiveSub = activeSet.has(String(clinic._id));
+    return {
+      ...clinic,
+      whatsappVisible: resolveOverride(clinic?.whatsappOverride, hasActiveSub),
+      verifiedBadgeVisible: resolveOverride(clinic?.verifiedBadgeOverride, hasActiveSub),
+    };
+  });
+};
+
 /* ================= CREATE CLINIC ================= */
 router.post(
   "/",
@@ -553,17 +572,23 @@ router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Res
       );
       const whatsapp = normalizeContactNumber(getCell(row, ["whatsapp"]));
 
-      if (!clinicName || !categoryName || !contactNumber || !whatsapp) {
-        skipped.push({
-          row: rowNumber,
-          reason: "Clinic name, category, contact number and WhatsApp number are required",
-        });
-        continue;
+      // Collect every failing check instead of returning on the first one,
+      // so a row can report all of its problems in one pass.
+      const rowErrors: string[] = [];
+      if (!clinicName) rowErrors.push("Clinic name is required");
+      if (!categoryName) rowErrors.push("Category is required");
+      if (!contactNumber) rowErrors.push("Contact number is required");
+      if (!whatsapp) rowErrors.push("WhatsApp number is required");
+
+      const categoryId = categoryName
+        ? categoryIdByName.get(categoryName.trim().toLowerCase())
+        : undefined;
+      if (categoryName && !categoryId) {
+        rowErrors.push(`Unknown clinic category: ${categoryName}`);
       }
 
-      const categoryId = categoryIdByName.get(categoryName.trim().toLowerCase());
-      if (!categoryId) {
-        skipped.push({ row: rowNumber, reason: `Unknown clinic category: ${categoryName}` });
+      if (rowErrors.length) {
+        skipped.push({ row: rowNumber, reason: rowErrors.join("; ") });
         continue;
       }
 
@@ -760,8 +785,12 @@ return distance <= 15;
 
 
 
+const withFlags = await attachSubscriptionFlags(
+nearby.map((clinic: any) => clinic.toObject())
+);
+
 return res.json(
-nearby
+withFlags
 );
 
 
@@ -796,7 +825,8 @@ router.get("/", async (req, res) => {
         .populate("dermaCategory", "name")
         .lean();
 
-      return res.json(clinics.map(stripHeavyClinicFields));
+      const withFlags = await attachSubscriptionFlags(clinics.map(stripHeavyClinicFields));
+      return res.json(withFlags);
     }
 
     const clinics = await Clinic.find({ isActive: { $ne: false } }).populate("dermaCategory", "name");
@@ -804,7 +834,8 @@ router.get("/", async (req, res) => {
       await ensureClinicSlug(clinic);
     }
 
-    res.json(clinics);
+    const withFlags = await attachSubscriptionFlags(clinics.map((clinic) => clinic.toObject()));
+    res.json(withFlags);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch clinics" });
   }
@@ -831,7 +862,8 @@ router.get("/:id", async (req, res) => {
     }
 
     await ensureClinicSlug(clinic);
-    res.json(clinic);
+    const [withFlags] = await attachSubscriptionFlags([clinic.toObject()]);
+    res.json(withFlags);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch clinic" });
   }

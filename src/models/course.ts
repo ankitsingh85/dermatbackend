@@ -125,7 +125,6 @@ const CourseSchema = new Schema<CourseDocument>(
     trainerExperience: { type: String, trim: true },
     languageOfDelivery: {
       type: String,
-      enum: ["English", "Hindi", "Bilingual"],
     },
     whatsIncluded: { type: String, trim: true },
     whatsNotIncluded: { type: String, trim: true },

@@ -164,9 +164,14 @@ router.post("/", upload.single("profileImage"), async (req, res) => {
       return res.status(400).json({ message: "All required fields missing" });
     }
 
-    const exists = await Doctor.findOne({ email: cleanEmail });
-    if (exists) {
-      return res.status(400).json({ message: "Email already exists" });
+    const emailExists = await Doctor.findOne({ email: cleanEmail });
+    if (emailExists) {
+      return res.status(400).json({ message: "Email already exists for another doctor" });
+    }
+
+    const phoneExists = await Doctor.findOne({ phone: cleanPhone });
+    if (phoneExists) {
+      return res.status(400).json({ message: "Mobile number already exists for another doctor" });
     }
 
     const doctor = new Doctor({
@@ -247,6 +252,26 @@ router.put("/:id", upload.single("profileImage"), async (req, res) => {
 
     if (uploadedProfileImage) {
       updateData.profileImage = uploadedProfileImage;
+    }
+
+    if (updateData.email) {
+      const emailExists = await Doctor.findOne({
+        email: updateData.email,
+        _id: { $ne: req.params.id },
+      });
+      if (emailExists) {
+        return res.status(400).json({ message: "Email already exists for another doctor" });
+      }
+    }
+
+    if (updateData.phone) {
+      const phoneExists = await Doctor.findOne({
+        phone: updateData.phone,
+        _id: { $ne: req.params.id },
+      });
+      if (phoneExists) {
+        return res.status(400).json({ message: "Mobile number already exists for another doctor" });
+      }
     }
 
     const updatedDoctor = await Doctor.findByIdAndUpdate(

@@ -180,12 +180,6 @@ const ProductSchema = new Schema<ProductDocument>(
       required: true,
 
       trim: true,
-
-      validate: {
-        validator: (value: string) => textOnlyRegex.test(value),
-
-        message: "Product name should contain only letters",
-      },
     },
 
     /* MULTIPLE CATEGORY */
@@ -228,8 +222,6 @@ const ProductSchema = new Schema<ProductDocument>(
 
     quantityUnit: {
       type: String,
-
-      enum: ["Nos", "Qty", "ML", "Grams", "KG", "Litre"],
 
       default: "Nos",
     },

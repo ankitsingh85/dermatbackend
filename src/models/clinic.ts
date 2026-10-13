@@ -59,6 +59,14 @@ export interface IClinic extends Document {
     latitude?: number;
   longitude?: number;
 
+  // Admin's manual override on top of whether the clinic has an active
+  // subscription — "auto" defers to the subscription, "enabled"/"disabled"
+  // force the feature on/off regardless of plan status. Same pattern used
+  // for all three subscription-gated perks.
+  whatsappOverride?: "auto" | "enabled" | "disabled";
+  leadAccessOverride?: "auto" | "enabled" | "disabled";
+  verifiedBadgeOverride?: "auto" | "enabled" | "disabled";
+
   // Admin approval gate for self-registered clinics. New signups start
   // "pending" and can't log in until an admin approves them; rejected
   // clinics are told why (rejectionReason) and can't log in either.
@@ -184,6 +192,21 @@ const ClinicSchema = new Schema<IClinic>(
     clinicStatus: { type: String, default: "Open" },
     verifiedBadge: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    whatsappOverride: {
+      type: String,
+      enum: ["auto", "enabled", "disabled"],
+      default: "auto",
+    },
+    leadAccessOverride: {
+      type: String,
+      enum: ["auto", "enabled", "disabled"],
+      default: "auto",
+    },
+    verifiedBadgeOverride: {
+      type: String,
+      enum: ["auto", "enabled", "disabled"],
+      default: "auto",
+    },
 
     approvalStatus: {
       type: String,

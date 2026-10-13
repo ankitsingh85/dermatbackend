@@ -96,12 +96,11 @@ router.post("/bulk-upload", upload.single("file"), async (req: Request, res: Res
       const name = getCell(row, ["name", "b2bcategoryname", "b2bcategory", "category"]);
       const imageUrl = getCell(row, ["imageurl", "image", "b2bcategoryimage"]);
 
-      if (!name) {
-        skipped.push({ row: rowNumber, reason: "Category name is required" });
-        continue;
-      }
-      if (!imageUrl) {
-        skipped.push({ row: rowNumber, reason: "Image URL is required" });
+      const rowErrors: string[] = [];
+      if (!name) rowErrors.push("Category name is required");
+      if (!imageUrl) rowErrors.push("Image URL is required");
+      if (rowErrors.length) {
+        skipped.push({ row: rowNumber, reason: rowErrors.join("; ") });
         continue;
       }
 

@@ -120,13 +120,11 @@ router.post("/bulk-upload", upload.single("file"), async (req, res) => {
         const name = getCell(row, ["name", "categoryname", "category"]);
         const imageUrl = getCell(row, ["imageurl", "image", "categoryimage", "categoryimageurl"]);
 
-        if (!name) {
-          skipped.push({ row: index + 2, reason: "Category name is required" });
-          return null;
-        }
-
-        if (!imageUrl) {
-          skipped.push({ row: index + 2, reason: "Image URL is required" });
+        const rowErrors: string[] = [];
+        if (!name) rowErrors.push("Category name is required");
+        if (!imageUrl) rowErrors.push("Image URL is required");
+        if (rowErrors.length) {
+          skipped.push({ row: index + 2, reason: rowErrors.join("; ") });
           return null;
         }
 

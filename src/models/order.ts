@@ -23,6 +23,8 @@ export interface IOrder extends Document {
     clinicAddress?: string;
   }[];
   totalAmount: number;
+  couponCode?: string;
+  discountAmount?: number;
   address: {
     type: string;
     address: string;
@@ -86,6 +88,8 @@ const OrderSchema = new Schema<IOrder>(
       type: Number,
       required: true,
     },
+    couponCode: { type: String, trim: true, uppercase: true },
+    discountAmount: { type: Number, min: 0 },
     address: {
       type: {
         type: String,

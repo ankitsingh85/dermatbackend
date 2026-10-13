@@ -67,6 +67,7 @@ const normalizeNumericFields = (payload: Record<string, unknown>) => {
     "stockAvailable",
     "mrp",
     "discountedPrice",
+    "discountPercent",
     "gst",
   ] as const;
 
@@ -152,6 +153,7 @@ const friendlyFieldNames: Record<string, string> = {
   licenseNumber: "License number",
   mrp: "MRP",
   discountedPrice: "Discounted price",
+  discountPercent: "Discount %",
   productVideoUrl: "Product video URL",
   productImages: "Product images",
   gst: "GST %",
@@ -164,8 +166,12 @@ const validateB2BPayload = (
   payload: Record<string, unknown>,
   isCreate = false
 ) => {
+  // Collect every failing check instead of returning on the first one, so
+  // a row (or the manual form) can report all of its problems in one pass.
+  const errors: string[] = [];
+
   if (isCreate && !stripHtml(payload.productName)) {
-    return { message: `${friendlyFieldNames.productName} is required` };
+    errors.push(`${friendlyFieldNames.productName} is required`);
   }
 
   if (
@@ -174,7 +180,7 @@ const validateB2BPayload = (
       !Array.isArray(payload.category) ||
       !payload.category.length)
   ) {
-    return { message: "At least one category is required" };
+    errors.push("At least one category is required");
   }
 
   if (
@@ -183,35 +189,29 @@ const validateB2BPayload = (
       payload.discountedPrice === null ||
       payload.discountedPrice === "")
   ) {
-    return { message: `${friendlyFieldNames.discountedPrice} is required` };
+    errors.push(`${friendlyFieldNames.discountedPrice} is required`);
   }
 
   if (
     payload.productName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.productName))
   ) {
-    return {
-      message: "Product name should contain only letters and spaces",
-    };
+    errors.push("Product name should contain only letters and spaces");
   }
 
   if (payload.brandName !== undefined && !textOnlyRegex.test(stripHtml(payload.brandName))) {
-    return {
-      message: "Brand name should contain only letters and spaces",
-    };
+    errors.push("Brand name should contain only letters and spaces");
   }
 
   if (
     payload.manufacturerName !== undefined &&
     !textOnlyRegex.test(stripHtml(payload.manufacturerName))
   ) {
-    return {
-      message: "Manufacturer name should contain only letters and spaces",
-    };
+    errors.push("Manufacturer name should contain only letters and spaces");
   }
 
   if (payload.hsnCode !== undefined && !digitsOnlyRegex.test(stripHtml(payload.hsnCode))) {
-    return { message: "HSN code must contain digits only" };
+    errors.push("HSN code must contain digits only");
   }
 
   const numericFieldsIfProvided = [
@@ -221,27 +221,37 @@ const validateB2BPayload = (
     "stockAvailable",
     "mrp",
     "discountedPrice",
+    "discountPercent",
   ] as const;
 
   for (const field of numericFieldsIfProvided) {
     if (payload[field] !== undefined && Number.isNaN(Number(payload[field]))) {
-      return { message: `${friendlyFieldNames[field]} must be a valid number` };
+      errors.push(`${friendlyFieldNames[field]} must be a valid number`);
     }
+  }
+
+  if (
+    payload.discountPercent !== undefined &&
+    payload.discountPercent !== null &&
+    payload.discountPercent !== "" &&
+    (Number(payload.discountPercent) < 0 || Number(payload.discountPercent) > 100)
+  ) {
+    errors.push("Discount % must be between 0 and 100");
   }
 
   if (
     payload.bulkPriceTier !== undefined &&
     !digitsOnlyRegex.test(String(payload.bulkPriceTier).trim())
   ) {
-    return { message: "Bulk price tier must contain digits only" };
+    errors.push("Bulk price tier must contain digits only");
   }
 
   if (payload.licenseNumber !== undefined && !digitsOnlyRegex.test(stripHtml(payload.licenseNumber))) {
-    return { message: "License number must contain digits only" };
+    errors.push("License number must contain digits only");
   }
 
   if (payload.productVideoUrl !== undefined && !isValidUrl(payload.productVideoUrl)) {
-    return { message: "Product video URL must be a valid URL" };
+    errors.push("Product video URL must be a valid URL");
   }
 
   // GST is a free-form percentage (0-100) instead of a fixed enum, to
@@ -250,11 +260,11 @@ const validateB2BPayload = (
   if (payload.gst !== undefined) {
     const gstValue = Number(payload.gst);
     if (Number.isNaN(gstValue) || gstValue < 0 || gstValue > 100) {
-      return { message: "GST % must be a valid number between 0 and 100" };
+      errors.push("GST % must be a valid number between 0 and 100");
     }
   }
 
-  return null;
+  return errors.length ? { message: errors.join("; ") } : null;
 };
 
 /* ================= SKU GENERATOR =================
@@ -452,6 +462,7 @@ const B2B_PRODUCT_BULK_FIELD_HEADERS: Record<string, string[]> = {
   licenseNumber: ["licensenumber", "license"],
   mrp: ["mrp"],
   discountedPrice: ["discountedprice", "price"],
+  discountPercent: ["discountpercent", "discount"],
   gst: ["gst", "gstpercent", "tax"],
   taxIncluded: ["taxincluded"],
   productImages: ["productimages", "images"],
