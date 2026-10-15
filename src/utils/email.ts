@@ -20,7 +20,8 @@ pass:process.env.EMAIL_PASS
 export const sendMail = async(
 to:string,
 subject:string,
-text:string
+text:string,
+html?:string
 ):Promise<void>=>{
 
 
@@ -32,7 +33,9 @@ to,
 
 subject,
 
-text
+text,
+
+...(html ? { html } : {}),
 
 });
 

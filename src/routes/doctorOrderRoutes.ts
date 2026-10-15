@@ -1,6 +1,12 @@
 import express from "express";
 import mongoose from "mongoose";
 import DoctorOrder from "../models/doctorOrder";
+import Doctor from "../models/doctor";
+import { sendMail } from "../utils/email";
+import {
+  buildOrderConfirmationEmail,
+  buildOrderCancellationEmail,
+} from "../utils/orderConfirmationEmail";
 
 const router = express.Router();
 
@@ -96,6 +102,31 @@ router.post("/", async (req, res) => {
     });
 
     const savedOrder = await order.save();
+
+    // Booking-confirmation email — best-effort, never blocks the response.
+    Doctor.findById(savedOrder.doctorId)
+      .select("firstName lastName email")
+      .then((doctor) => {
+        if (!doctor?.email) return;
+
+        const { subject, text, html } = buildOrderConfirmationEmail({
+          recipientName: `${doctor.firstName || ""} ${doctor.lastName || ""}`.trim(),
+          orderId: String(savedOrder._id),
+          orderType: savedOrder.orderType,
+          items: savedOrder.products.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            itemType: item.itemType,
+          })),
+          totalAmount: savedOrder.totalAmount,
+          createdAt: savedOrder.createdAt || new Date(),
+        });
+
+        return sendMail(doctor.email, subject, text, html);
+      })
+      .catch((err) => console.error("Failed to send booking confirmation email:", err));
+
     res.status(201).json(savedOrder);
   } catch (err: any) {
     console.error("Doctor order create error:", err.message);
@@ -165,6 +196,69 @@ router.put("/:orderId/status", async (req, res) => {
   } catch (err: any) {
     console.error("Doctor order status error:", err.message);
     res.status(500).json({ message: "Failed to update doctor order status", error: err.message });
+  }
+});
+
+/** ✅ DOCTOR: Cancel one of their own orders (scoped by x-doctor-id, same
+ * as GET /my, so one doctor can never cancel another doctor's order). */
+router.put("/:orderId/cancel", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ message: "Invalid order ID" });
+    }
+
+    const doctorId = req.headers["x-doctor-id"] as string;
+    if (!doctorId) {
+      return res.status(401).json({ message: "Doctor ID missing" });
+    }
+
+    const order = await DoctorOrder.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Doctor order not found" });
+
+    if (String(order.doctorId) !== String(doctorId)) {
+      return res.status(403).json({ message: "You can only cancel your own orders" });
+    }
+
+    if (order.status === "Cancelled") {
+      return res.status(400).json({ message: "This order is already cancelled" });
+    }
+    if (order.status === "Delivered") {
+      return res.status(400).json({ message: "A delivered order cannot be cancelled" });
+    }
+
+    order.status = "Cancelled";
+    await order.save();
+
+    // Cancellation email — best-effort, never blocks the response.
+    const cancelledAt = order.updatedAt || new Date();
+    Doctor.findById(order.doctorId)
+      .select("firstName lastName email")
+      .then((doctor) => {
+        if (!doctor?.email) return;
+
+        const { subject, text, html } = buildOrderCancellationEmail({
+          recipientName: `${doctor.firstName || ""} ${doctor.lastName || ""}`.trim(),
+          orderId: String(order._id),
+          orderType: order.orderType,
+          items: order.products.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            itemType: item.itemType,
+          })),
+          totalAmount: order.totalAmount,
+          cancelledAt,
+        });
+
+        return sendMail(doctor.email, subject, text, html);
+      })
+      .catch((err) => console.error("Failed to send order cancellation email:", err));
+
+    res.status(200).json({ message: "Order cancelled", order });
+  } catch (err: any) {
+    console.error("Doctor order cancel error:", err.message);
+    res.status(500).json({ message: "Failed to cancel order", error: err.message });
   }
 });
 

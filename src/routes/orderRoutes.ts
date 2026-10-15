@@ -2,7 +2,17 @@ import express from "express";
 import mongoose from "mongoose";
 import Order from "../models/order";
 import Coupon from "../models/coupon";
+import User from "../models/user";
+import B2BUser from "../models/B2BUser";
+import Clinic from "../models/clinic";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
+import { sendMail } from "../utils/email";
+import {
+  buildOrderConfirmationEmail,
+  buildClinicTreatmentNotificationEmail,
+  buildOrderCancellationEmail,
+  buildClinicTreatmentCancellationEmail,
+} from "../utils/orderConfirmationEmail";
 // import UserProfile from "../models/userinformation";
 
 const router = express.Router();
@@ -74,6 +84,33 @@ const matchesOrderType = (order: any, requestedType?: string) => {
     !isConsultationLike(order) &&
     (hasItemType(order, "product") || orderType === "product")
   );
+};
+
+// Resolves the buyer behind a saved order (by its own stored ownerType and
+// id fields) to {name, email, phone} — shared by the cancellation-email
+// flow below. Mirrors the inline lookup already used when an order is
+// first created, but reads the identity straight off the order document
+// instead of request-time variables, so it works for an order fetched
+// independently later (e.g. when it's being cancelled).
+const resolveOrderRecipient = async (order: {
+  ownerType?: string;
+  userId?: any;
+  clinicId?: any;
+  b2bUserId?: any;
+}): Promise<{ name?: string; email?: string; phone?: string } | null> => {
+  if (order.ownerType === "clinic" && order.clinicId) {
+    const clinic = await Clinic.findById(order.clinicId).select("clinicName email contactNumber");
+    return clinic ? { name: clinic.clinicName, email: clinic.email, phone: clinic.contactNumber } : null;
+  }
+  if (order.ownerType === "b2buser" && order.b2bUserId) {
+    const b2bUser = await B2BUser.findById(order.b2bUserId).select("name email contactNo");
+    return b2bUser ? { name: b2bUser.name, email: b2bUser.email, phone: b2bUser.contactNo } : null;
+  }
+  if (order.userId) {
+    const user = await User.findById(order.userId).select("name email contactNo");
+    return user ? { name: user.name, email: user.email, phone: user.contactNo } : null;
+  }
+  return null;
 };
 
 /** ✅ USER: Get the authenticated user's paid, successful consultation service IDs.
@@ -178,6 +215,122 @@ router.post("/", async (req, res) => {
       );
     }
 
+    // Booking-confirmation email — best-effort, never blocks the response
+    // for an already-paid order. Covers regular patient ("user") bookings
+    // (products, courses, workshops/trainings, treatments, consultations —
+    // they all flow through this same route), B2B product purchases, and
+    // clinic business purchases; doctor checkouts aren't addressed here.
+    const recipientLookup: Promise<{ name?: string; email?: string; phone?: string } | null> | null =
+      resolvedOwnerType === "user" && savedOrder.userId
+        ? User.findById(savedOrder.userId)
+            .select("name email contactNo")
+            .then((user) => (user ? { name: user.name, email: user.email, phone: user.contactNo } : null))
+        : resolvedOwnerType === "b2buser" && savedOrder.b2bUserId
+        ? B2BUser.findById(savedOrder.b2bUserId)
+            .select("name email contactNo")
+            .then((b2bUser) =>
+              b2bUser ? { name: b2bUser.name, email: b2bUser.email, phone: b2bUser.contactNo } : null
+            )
+        : resolvedOwnerType === "clinic" && savedOrder.clinicId
+        ? Clinic.findById(savedOrder.clinicId)
+            .select("clinicName email contactNumber")
+            .then((clinic) =>
+              clinic
+                ? { name: clinic.clinicName, email: clinic.email, phone: clinic.contactNumber }
+                : null
+            )
+        : null;
+
+    if (recipientLookup) {
+      recipientLookup
+        .then((recipient) => {
+          if (!recipient?.email) return;
+
+          const { subject, text, html } = buildOrderConfirmationEmail({
+            recipientName: recipient.name || "",
+            orderId: String(savedOrder._id),
+            orderType: savedOrder.orderType,
+            items: savedOrder.products.map((item) => ({
+              name: item.name,
+              quantity: item.quantity,
+              price: item.price,
+              itemType: item.itemType,
+              clinicName: item.clinicName,
+              clinicAddress: item.clinicAddress,
+            })),
+            totalAmount: savedOrder.totalAmount,
+            discountAmount: savedOrder.discountAmount,
+            couponCode: savedOrder.couponCode,
+            createdAt: savedOrder.createdAt || new Date(),
+          });
+
+          return sendMail(recipient.email, subject, text, html);
+        })
+        .catch((err) => console.error("Failed to send booking confirmation email:", err));
+    }
+
+    // Notify the clinic(s) picked at checkout (via the clinic-selection
+    // step) for any treatment line items in this order — best-effort, same
+    // fire-and-forget pattern as the buyer's own confirmation email above.
+    // A single order normally books at one clinic, but group by clinicId
+    // in case a future cart mixes treatments across clinics.
+    const treatmentClinicGroups = new Map<
+      string,
+      { clinicName?: string; items: typeof savedOrder.products }
+    >();
+    savedOrder.products.forEach((item) => {
+      if (item.itemType === "treatment" && item.clinicId) {
+        const group = treatmentClinicGroups.get(item.clinicId) || {
+          clinicName: item.clinicName,
+          items: [],
+        };
+        group.items.push(item);
+        treatmentClinicGroups.set(item.clinicId, group);
+      }
+    });
+
+    if (treatmentClinicGroups.size > 0 && recipientLookup) {
+      recipientLookup
+        .then((buyer) => {
+          treatmentClinicGroups.forEach((group, clinicId) => {
+            Clinic.findById(clinicId)
+              .select("clinicName email")
+              .then((clinic) => {
+                if (!clinic?.email) return;
+
+                const amountForClinic = group.items.reduce(
+                  (sum, item) => sum + item.price * item.quantity,
+                  0
+                );
+
+                const { subject, text, html } = buildClinicTreatmentNotificationEmail({
+                  clinicName: clinic.clinicName || group.clinicName || "",
+                  orderId: String(savedOrder._id),
+                  patientName: buyer?.name || "",
+                  patientEmail: buyer?.email,
+                  patientPhone: buyer?.phone,
+                  items: group.items.map((item) => ({
+                    name: item.name,
+                    quantity: item.quantity,
+                    price: item.price,
+                  })),
+                  amountPaid: amountForClinic,
+                  paymentId: savedOrder.razorpayPaymentId,
+                  createdAt: savedOrder.createdAt || new Date(),
+                });
+
+                return sendMail(clinic.email, subject, text, html);
+              })
+              .catch((err) =>
+                console.error("Failed to send clinic treatment-booking notification email:", err)
+              );
+          });
+        })
+        .catch((err) =>
+          console.error("Failed to resolve buyer info for clinic notification email:", err)
+        );
+    }
+
     res.status(201).json(savedOrder);
   } catch (err: any) {
     console.error("❌ Error creating order:", err.message);
@@ -250,6 +403,136 @@ router.get("/all", async (_req, res) => {
   } catch (err: any) {
     console.error("❌ Error fetching all orders:", err.message);
     res.status(500).json({ message: "Failed to fetch all orders", error: err.message });
+  }
+});
+
+/** ✅ OWNER: Cancel one of the requester's own orders (user, clinic, or
+ * B2B user — scoped by the same identity headers as GET /my, so one
+ * account can never cancel another account's order). */
+router.put("/:orderId/cancel", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ message: "Invalid order ID" });
+    }
+
+    const userId = req.headers["x-user-id"] as string;
+    const clinicId = req.headers["x-clinic-id"] as string;
+    const b2bUserId = req.headers["x-b2buser-id"] as string;
+    const ownerType = String(req.headers["x-owner-type"] || "").toLowerCase();
+
+    if (!userId && !clinicId && !b2bUserId) {
+      return res.status(401).json({ message: "User, clinic, or B2B user ID missing" });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    const isOwner =
+      ownerType === "clinic" || clinicId
+        ? clinicId && String(order.clinicId) === String(clinicId)
+        : ownerType === "b2buser" || b2bUserId
+        ? b2bUserId && String(order.b2bUserId) === String(b2bUserId)
+        : userId && String(order.userId) === String(userId);
+
+    if (!isOwner) {
+      return res.status(403).json({ message: "You can only cancel your own orders" });
+    }
+
+    if (order.status === "Cancelled") {
+      return res.status(400).json({ message: "This order is already cancelled" });
+    }
+    if (order.status === "Delivered") {
+      return res.status(400).json({ message: "A delivered order cannot be cancelled" });
+    }
+
+    order.status = "Cancelled";
+    await order.save();
+
+    // Cancellation emails — best-effort, never block the response. Mirrors
+    // the booking-confirmation flow: the buyer always gets notified, and
+    // the clinic (for any treatment line items that had one picked at
+    // checkout) gets notified too.
+    const cancelledAt = order.updatedAt || new Date();
+
+    resolveOrderRecipient(order)
+      .then((recipient) => {
+        if (!recipient?.email) return;
+
+        const { subject, text, html } = buildOrderCancellationEmail({
+          recipientName: recipient.name || "",
+          orderId: String(order._id),
+          orderType: order.orderType,
+          items: order.products.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            itemType: item.itemType,
+            clinicName: item.clinicName,
+            clinicAddress: item.clinicAddress,
+          })),
+          totalAmount: order.totalAmount,
+          cancelledAt,
+        });
+
+        return sendMail(recipient.email, subject, text, html);
+      })
+      .catch((err) => console.error("Failed to send order cancellation email:", err));
+
+    const treatmentClinicGroups = new Map<
+      string,
+      { clinicName?: string; items: typeof order.products }
+    >();
+    order.products.forEach((item) => {
+      if (item.itemType === "treatment" && item.clinicId) {
+        const group = treatmentClinicGroups.get(item.clinicId) || {
+          clinicName: item.clinicName,
+          items: [],
+        };
+        group.items.push(item);
+        treatmentClinicGroups.set(item.clinicId, group);
+      }
+    });
+
+    if (treatmentClinicGroups.size > 0) {
+      resolveOrderRecipient(order)
+        .then((buyer) => {
+          treatmentClinicGroups.forEach((group, clinicId) => {
+            Clinic.findById(clinicId)
+              .select("clinicName email")
+              .then((clinic) => {
+                if (!clinic?.email) return;
+
+                const { subject, text, html } = buildClinicTreatmentCancellationEmail({
+                  clinicName: clinic.clinicName || group.clinicName || "",
+                  orderId: String(order._id),
+                  patientName: buyer?.name || "",
+                  patientEmail: buyer?.email,
+                  patientPhone: buyer?.phone,
+                  items: group.items.map((item) => ({
+                    name: item.name,
+                    quantity: item.quantity,
+                    price: item.price,
+                  })),
+                  cancelledAt,
+                });
+
+                return sendMail(clinic.email, subject, text, html);
+              })
+              .catch((err) =>
+                console.error("Failed to send clinic treatment-cancellation email:", err)
+              );
+          });
+        })
+        .catch((err) =>
+          console.error("Failed to resolve buyer info for clinic cancellation email:", err)
+        );
+    }
+
+    res.status(200).json({ message: "Order cancelled", order });
+  } catch (err: any) {
+    console.error("❌ Error cancelling order:", err.message);
+    res.status(500).json({ message: "Failed to cancel order", error: err.message });
   }
 });
 
