@@ -31,6 +31,9 @@ export interface IOrder extends Document {
   };
   paymentStatus?: "pending" | "success" | "failed";
   status?: "Pending" | "Shipped" | "Delivered" | "Cancelled";
+  // Set once the clinic has OTP-verified the patient in person and begun
+  // the treatment (see the "Start Treatment" flow in orderRoutes.ts).
+  treatmentStartedAt?: Date;
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
@@ -109,6 +112,7 @@ const OrderSchema = new Schema<IOrder>(
       enum: ["Pending", "Shipped", "Delivered", "Cancelled"],
       default: "Pending",
     },
+    treatmentStartedAt: { type: Date },
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },
     razorpaySignature: { type: String },

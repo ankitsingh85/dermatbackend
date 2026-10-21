@@ -133,35 +133,34 @@ export const businessMobileLogin = async (req: Request, res: Response) => {
       });
     }
 
-    // Brand-new number — self-register as a B2B user (Name + Address,
-    // Email optional — captured up front so it's available later if this
-    // account becomes a clinic, e.g. for admin-approval emails).
+    // Brand-new number — self-register as a B2B user (Name + Address +
+    // Email, all mandatory — email is captured up front so it's available
+    // later if this account becomes a clinic, e.g. for admin-approval
+    // emails).
     const name = String(req.body?.name ?? req.body?.clinicName ?? "").trim();
     const address = String(req.body?.address ?? "").trim();
     const email = String(req.body?.email ?? "").trim().toLowerCase();
 
-    if (!name || !address) {
+    if (!name || !address || !email) {
       return res.status(400).json({
-        message: "Name and address are required",
+        message: "Name, email and address are required",
         needsProfile: true,
       });
     }
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({
         message: "Enter a valid email address",
         needsProfile: true,
       });
     }
 
-    if (email) {
-      const existingByEmail = await B2BUser.findOne({ email });
-      if (existingByEmail) {
-        return res.status(400).json({
-          message: "Email already registered with another B2B account",
-          needsProfile: true,
-        });
-      }
+    const existingByEmail = await B2BUser.findOne({ email });
+    if (existingByEmail) {
+      return res.status(400).json({
+        message: "Email already registered with another B2B account",
+        needsProfile: true,
+      });
     }
 
     const createdB2BUser = await B2BUser.create({
@@ -170,7 +169,7 @@ export const businessMobileLogin = async (req: Request, res: Response) => {
       contactPerson: name,
       contactNo,
       address,
-      ...(email ? { email } : {}),
+      email,
       status: "active",
     });
 

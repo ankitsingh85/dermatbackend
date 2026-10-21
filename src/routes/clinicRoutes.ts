@@ -373,13 +373,25 @@ router.post(
       normalizeContactNumber(contactNumber) ||
       normalizeContactNumber(contactNo);
     const normalizedWhatsapp = normalizeContactNumber(whatsapp);
+    const cleanEmail = String(email ?? "").trim().toLowerCase();
 
-    // Only clinic name, category, contact number and WhatsApp number are
+    // Clinic name, category, contact number, WhatsApp number and email are
     // mandatory to create a clinic — everything else is optional.
-    if (!clinicName || !dermaCategory || !normalizedContactNumber || !normalizedWhatsapp) {
+    if (
+      !clinicName ||
+      !dermaCategory ||
+      !normalizedContactNumber ||
+      !normalizedWhatsapp ||
+      !cleanEmail
+    ) {
       return res.status(400).json({
-        message: "Clinic name, category, contact number and WhatsApp number are required",
+        message:
+          "Clinic name, category, contact number, WhatsApp number and email are required",
       });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ message: "Enter a valid email address" });
     }
 
     const categoryExists = await ClinicCategory.findById(dermaCategory);
@@ -420,7 +432,7 @@ const location = extractLatLngFromMapLink(rest.mapLink);
       dermaCategory,
       address: nextAddressText,
       addresses: clinicAddresses,
-      ...(email ? { email: String(email).trim() } : {}),
+      email: cleanEmail,
 
 
 // ADD THESE TWO
@@ -820,7 +832,7 @@ router.get("/", async (req, res) => {
     if (lightMode) {
       const clinics = await Clinic.find()
         .select(
-          "cuc clinicName slug clinicType ownerName website contactNumber whatsapp email dermaCategory address city services sector pincode mapLink clinicStatus verifiedBadge isActive doctors workingHours clinicLogo bannerImage rateCard specialOffers photos certifications video licenseNo experience treatmentsAvailable availableServices consultationFee bookingMode clinicDescription instagram linkedin facebook standardPlanLink latitude longitude gstNumber addresses approvalStatus rejectionReason approvedAt createdAt updatedAt"
+          "cuc clinicName slug clinicType ownerName website contactNumber whatsapp email dermaCategory address city services sector pincode mapLink clinicStatus verifiedBadge isActive isRecommended recommendedOrder doctors workingHours clinicLogo bannerImage rateCard specialOffers photos certifications video licenseNo experience treatmentsAvailable availableServices consultationFee bookingMode clinicDescription instagram linkedin facebook standardPlanLink latitude longitude gstNumber addresses approvalStatus rejectionReason approvedAt createdAt updatedAt"
         )
         .populate("dermaCategory", "name")
         .lean();
@@ -866,6 +878,96 @@ router.get("/:id", async (req, res) => {
     res.json(withFlags);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch clinic" });
+  }
+});
+
+/* ================= TOGGLE RECOMMENDED FLAG =================
+   Lightweight, admin-only toggle for the "Recommended Clinic" tab — kept
+   separate from the big multipart PUT /:id route below since this never
+   needs file uploads, just a boolean flip. */
+const MAX_RECOMMENDED_PER_LOCATION = 10;
+
+router.put("/:id/recommend", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid clinic ID" });
+    }
+
+    const body = req.body || {};
+    const setFields: Record<string, unknown> = {};
+    const unsetFields: Record<string, "" > = {};
+
+    // Toggling on/off — clears any existing display rank when turned off,
+    // so a stale "#2" doesn't linger on a clinic no longer recommended.
+    if (body.isRecommended !== undefined) {
+      const isRecommended = Boolean(body.isRecommended);
+      setFields.isRecommended = isRecommended;
+      if (!isRecommended) {
+        unsetFields.recommendedOrder = "";
+      }
+
+      // Cap how many clinics can be recommended per city — only matters
+      // when actually turning this clinic ON (and it wasn't already).
+      if (isRecommended) {
+        const current = await Clinic.findById(id).select("city isRecommended");
+        if (!current) {
+          return res.status(404).json({ message: "Clinic not found" });
+        }
+
+        if (!current.isRecommended) {
+          const city = (current.city || "").trim();
+          const recommendedInCity = await Clinic.countDocuments({
+            city: city,
+            isRecommended: true,
+          });
+
+          if (recommendedInCity >= MAX_RECOMMENDED_PER_LOCATION) {
+            return res.status(400).json({
+              message: city
+                ? `Only ${MAX_RECOMMENDED_PER_LOCATION} clinics can be recommended for ${city}. Remove one before adding another.`
+                : `Only ${MAX_RECOMMENDED_PER_LOCATION} clinics without a city set can be recommended. Remove one before adding another.`,
+            });
+          }
+        }
+      }
+    }
+
+    // Updating just the rank (e.g. from the Order column) — sent on its
+    // own, without isRecommended, so it can't accidentally un-recommend.
+    if (body.recommendedOrder !== undefined) {
+      if (body.recommendedOrder === null || body.recommendedOrder === "") {
+        unsetFields.recommendedOrder = "";
+      } else {
+        const order = Number(body.recommendedOrder);
+        if (!Number.isFinite(order)) {
+          return res.status(400).json({ message: "recommendedOrder must be a number" });
+        }
+        setFields.recommendedOrder = order;
+      }
+    }
+
+    if (Object.keys(setFields).length === 0 && Object.keys(unsetFields).length === 0) {
+      return res.status(400).json({ message: "Nothing to update" });
+    }
+
+    const updateQuery: Record<string, unknown> = {};
+    if (Object.keys(setFields).length) updateQuery.$set = setFields;
+    if (Object.keys(unsetFields).length) updateQuery.$unset = unsetFields;
+
+    const clinic = await Clinic.findByIdAndUpdate(id, updateQuery, { new: true }).select(
+      "clinicName isRecommended recommendedOrder"
+    );
+
+    if (!clinic) {
+      return res.status(404).json({ message: "Clinic not found" });
+    }
+
+    res.json({ message: "Clinic recommendation updated", clinic });
+  } catch (err: any) {
+    res
+      .status(500)
+      .json({ message: "Failed to update clinic recommendation", error: err.message });
   }
 });
 

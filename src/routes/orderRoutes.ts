@@ -13,6 +13,7 @@ import {
   buildOrderCancellationEmail,
   buildClinicTreatmentCancellationEmail,
 } from "../utils/orderConfirmationEmail";
+import { sendTwoFactorOtp, verifyTwoFactorOtp } from "../utils/twoFactorOtp";
 // import UserProfile from "../models/userinformation";
 
 const router = express.Router();
@@ -388,6 +389,129 @@ router.get("/my", async (req, res) => {
   }
 });
 
+/** ✅ CLINIC: Get every treatment booked AT this clinic (i.e. a patient
+ * picked this clinic in the clinic-selection step at checkout) — not to be
+ * confused with GET /my, which returns orders the clinic itself *bought*
+ * as a business account. These are patient-owned orders; the clinic here
+ * is just the service provider on one or more treatment line items. */
+router.get("/clinic-bookings/:clinicId", async (req, res) => {
+  try {
+    const { clinicId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(clinicId)) {
+      return res.status(400).json({ message: "Invalid clinic ID" });
+    }
+
+    const orders = await Order.find({
+      products: {
+        $elemMatch: { itemType: "treatment", clinicId: String(clinicId) },
+      },
+    })
+      .populate("userId", "name email contactNo")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json(orders);
+  } catch (err: any) {
+    console.error("❌ Error fetching clinic treatment bookings:", err.message);
+    return res
+      .status(500)
+      .json({ message: "Failed to fetch clinic treatment bookings", error: err.message });
+  }
+});
+
+const orderHasClinicTreatment = (order: any, clinicId: string) =>
+  Array.isArray(order?.products) &&
+  order.products.some(
+    (item: any) => item?.itemType === "treatment" && String(item?.clinicId) === String(clinicId)
+  );
+
+/** ✅ CLINIC: Send an OTP to the patient's own mobile number, as the first
+ * step of starting a treatment in person — the clinic reads the number on
+ * screen, the patient receives the SMS, and reads the code back to staff. */
+router.post("/:orderId/start-treatment/send-otp", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ message: "Invalid order ID" });
+    }
+
+    const clinicId = req.headers["x-clinic-id"] as string;
+    if (!clinicId) {
+      return res.status(401).json({ message: "Clinic ID missing" });
+    }
+
+    const order = await Order.findById(orderId).populate("userId", "name contactNo");
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    if (!orderHasClinicTreatment(order, clinicId)) {
+      return res.status(403).json({ message: "This treatment isn't booked at your clinic" });
+    }
+
+    if (order.status === "Cancelled") {
+      return res.status(400).json({ message: "This booking has been cancelled" });
+    }
+
+    if (order.treatmentStartedAt) {
+      return res
+        .status(400)
+        .json({ message: "Treatment has already been started for this booking" });
+    }
+
+    const patient = (order as any).userId;
+    const phone = patient?.contactNo;
+    if (!phone) {
+      return res.status(400).json({ message: "Patient does not have a mobile number on file" });
+    }
+
+    const { sessionId } = await sendTwoFactorOtp(phone);
+
+    return res.status(200).json({ message: "OTP sent to patient's mobile number", sessionId });
+  } catch (err: any) {
+    console.error("❌ Error sending start-treatment OTP:", err.message);
+    return res.status(400).json({ message: err.message || "Failed to send OTP" });
+  }
+});
+
+/** ✅ CLINIC: Verify the OTP the patient read out in person and mark the
+ * treatment as started. */
+router.post("/:orderId/start-treatment/verify-otp", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ message: "Invalid order ID" });
+    }
+
+    const clinicId = req.headers["x-clinic-id"] as string;
+    if (!clinicId) {
+      return res.status(401).json({ message: "Clinic ID missing" });
+    }
+
+    const { sessionId, otp } = req.body || {};
+
+    const order = await Order.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    if (!orderHasClinicTreatment(order, clinicId)) {
+      return res.status(403).json({ message: "This treatment isn't booked at your clinic" });
+    }
+
+    if (order.treatmentStartedAt) {
+      return res
+        .status(400)
+        .json({ message: "Treatment has already been started for this booking" });
+    }
+
+    await verifyTwoFactorOtp(sessionId, otp);
+
+    order.treatmentStartedAt = new Date();
+    await order.save();
+
+    return res.status(200).json({ message: "Treatment started", order });
+  } catch (err: any) {
+    console.error("❌ Error verifying start-treatment OTP:", err.message);
+    return res.status(400).json({ message: err.message || "Invalid OTP" });
+  }
+});
+
 /** ✅ ADMIN: Get all orders (from all users) */
 router.get("/all", async (_req, res) => {
   try {
@@ -444,6 +568,16 @@ router.put("/:orderId/cancel", async (req, res) => {
     }
     if (order.status === "Delivered") {
       return res.status(400).json({ message: "A delivered order cannot be cancelled" });
+    }
+
+    // Patients can't self-cancel a treatment booking — it needs the clinic
+    // in the loop, so they're directed to support instead (see the
+    // matching note on the user's treatment order history page).
+    if (order.ownerType === "user" && isTreatmentLike(order)) {
+      return res.status(403).json({
+        message:
+          "Treatment bookings can't be cancelled here. Please contact our support team for cancellation or any other query.",
+      });
     }
 
     order.status = "Cancelled";

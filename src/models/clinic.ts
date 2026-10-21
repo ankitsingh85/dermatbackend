@@ -59,6 +59,18 @@ export interface IClinic extends Document {
     latitude?: number;
   longitude?: number;
 
+  // Admin-curated "Recommended Clinic" flag — set from the admin panel's
+  // Recommended Clinic tab, independent of verifiedBadge/isActive. Used to
+  // surface a hand-picked list of clinics (filterable by city/sector)
+  // rather than relying purely on distance-based ranking.
+  isRecommended?: boolean;
+  // Manual display rank among recommended clinics — lower shows first
+  // (1, 2, 3, ...). Only meaningful while isRecommended is true; whichever
+  // recommended clinics end up within a visitor's radius are then sorted
+  // by this, so it effectively ranks "#1, #2, #3" per location without
+  // needing a separate per-city ranking table.
+  recommendedOrder?: number;
+
   // Admin's manual override on top of whether the clinic has an active
   // subscription — "auto" defers to the subscription, "enabled"/"disabled"
   // force the feature on/off regardless of plan status. Same pattern used
@@ -192,6 +204,8 @@ const ClinicSchema = new Schema<IClinic>(
     clinicStatus: { type: String, default: "Open" },
     verifiedBadge: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    isRecommended: { type: Boolean, default: false, index: true },
+    recommendedOrder: { type: Number },
     whatsappOverride: {
       type: String,
       enum: ["auto", "enabled", "disabled"],

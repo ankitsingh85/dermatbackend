@@ -112,10 +112,11 @@ const resolvedPatientId = await generatePatientId();
     const cleanContactNo = String(contactNo ?? "").trim();
     const cleanAddress = String(address ?? "").trim();
 
-    // Only name and contact number are mandatory — email and address are
-    // optional.
-    if (!cleanName || !cleanContactNo) {
-      return res.status(400).json({ message: "Name and contact number are required" });
+    // Name, contact number and email are mandatory — address is optional.
+    if (!cleanName || !cleanContactNo || !cleanEmail) {
+      return res
+        .status(400)
+        .json({ message: "Name, email and contact number are required" });
     }
 
     if (!nameRegex.test(cleanName)) {
@@ -124,7 +125,7 @@ const resolvedPatientId = await generatePatientId();
         .json({ message: "Patient name should contain only letters and spaces" });
     }
 
-    if (cleanEmail && !emailRegex.test(cleanEmail)) {
+    if (!emailRegex.test(cleanEmail)) {
       return res.status(400).json({ message: "Enter a valid email address" });
     }
 
@@ -149,7 +150,7 @@ const resolvedPatientId = await generatePatientId();
       name: cleanName,
       contactNo: cleanContactNo,
       address: cleanAddress,
-      ...(cleanEmail ? { email: cleanEmail } : {}),
+      email: cleanEmail,
       profileImage: uploadedProfileImage || "",
     });
 
