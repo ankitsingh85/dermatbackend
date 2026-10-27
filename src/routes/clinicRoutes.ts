@@ -8,7 +8,10 @@ import Clinic from "../models/clinic";
 import ClinicCategory from "../models/clinicCategory";
 import B2BUser from "../models/B2BUser";
 import Order from "../models/order";
-import { getActiveSubscriptionClinicIds, resolveOverride } from "../utils/clinicSubscriptionAccess";
+import {
+  getActiveSubscriptionDetails,
+  resolveOverride,
+} from "../utils/clinicSubscriptionAccess";
 import {
   buildClinicAddressFromText,
   formatClinicAddressText,
@@ -322,13 +325,18 @@ const stripHeavyClinicFields = (clinic: any) => {
    field, which always wins. */
 const attachSubscriptionFlags = async (clinics: any[]) => {
   const ids = clinics.map((clinic) => String(clinic._id));
-  const activeSet = await getActiveSubscriptionClinicIds(ids);
+  const subscriptionDetails = await getActiveSubscriptionDetails(ids);
   return clinics.map((clinic) => {
-    const hasActiveSub = activeSet.has(String(clinic._id));
+    const detail = subscriptionDetails.get(String(clinic._id));
+    const hasActiveSub = Boolean(detail);
     return {
       ...clinic,
       whatsappVisible: resolveOverride(clinic?.whatsappOverride, hasActiveSub),
       verifiedBadgeVisible: resolveOverride(clinic?.verifiedBadgeOverride, hasActiveSub),
+      // Used by the Find Clinics page to rank: plan + add-ons first, plan
+      // only next, no plan last — then by distance within each group.
+      hasActiveSubscription: hasActiveSub,
+      hasSubscriptionAddons: Boolean(detail?.hasAddons),
     };
   });
 };
@@ -770,35 +778,25 @@ $ne:null
 
 
 
-const nearby =
-clinics.filter(
-(clinic:any)=>{
-
-
-const distance =
-calculateDistanceKm(
-
-Number(lat),
-
-Number(lng),
-
-clinic.latitude,
-
-clinic.longitude
-
-);
-
-
-
-return distance <= 15;
-
-
-});
-
-
+const nearbyWithDistance = clinics
+  .map((clinic: any) => {
+    const distanceKm = calculateDistanceKm(
+      Number(lat),
+      Number(lng),
+      clinic.latitude,
+      clinic.longitude
+    );
+    return { clinic, distanceKm };
+  })
+  // Same 30km convention used everywhere else distance-filtering happens.
+  .filter((entry) => entry.distanceKm <= 30)
+  .sort((a, b) => a.distanceKm - b.distanceKm);
 
 const withFlags = await attachSubscriptionFlags(
-nearby.map((clinic: any) => clinic.toObject())
+  nearbyWithDistance.map((entry) => ({
+    ...entry.clinic.toObject(),
+    distanceKm: entry.distanceKm,
+  }))
 );
 
 return res.json(

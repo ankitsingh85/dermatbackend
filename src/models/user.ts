@@ -41,6 +41,7 @@ export interface IUserResultGalleryItem {
 
 export interface IUserPrescriptionItem {
   _id?: string;
+  label?: string;
   fileName: string;
   fileUrl: string;
   fileType: string;
@@ -160,6 +161,7 @@ const UserSchema = new Schema<IUser>(
     ],
     prescriptions: [
       {
+        label: { type: String, trim: true, default: "" },
         fileName: { type: String, required: true },
         fileUrl: { type: String, required: true },
         fileType: { type: String, default: "application/pdf" },

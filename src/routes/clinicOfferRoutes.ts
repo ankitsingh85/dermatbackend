@@ -2,8 +2,6 @@ import express, { Request, Response } from "express";
 import fs from "fs";
 import path from "path";
 import Offer3 from "../models/clinicOffer";
-import Clinic from "../models/clinic";
-import ClinicCategory from "../models/clinicCategory";
 import upload from "../middleware/uploads";
 
 const router = express.Router();
@@ -53,52 +51,20 @@ router.get("/", async (_req: Request, res: Response) => {
   }
 });
 
-// ADD NEW OFFER (Upload)
+// ADD NEW OFFER (Upload) — plain image upload, no clinic/category link
+// required (these are now standalone coupon promo banners).
 router.post(
   "/",
   upload.array("images", 20),
   async (req: Request, res: Response) => {
     try {
       const files = (req.files as Express.Multer.File[] | undefined) || [];
-      const { clinicId, categoryId } = req.body;
 
       if (!files.length) return res.status(400).json({ message: "Image is required" });
-      if (!clinicId) {
-        await deleteUploadedFiles(files);
-        return res.status(400).json({ message: "Clinic is required" });
-      }
-
-      const clinic = await Clinic.findById(clinicId);
-      if (!clinic) {
-        await deleteUploadedFiles(files);
-        return res.status(404).json({ message: "Clinic not found" });
-      }
-
-      let resolvedCategoryId = "";
-      if (categoryId) {
-        const category = await ClinicCategory.findById(categoryId);
-        if (!category) {
-          await deleteUploadedFiles(files);
-          return res.status(404).json({ message: "Category not found" });
-        }
-
-        if (clinic.dermaCategory.toString() !== category._id.toString()) {
-          await deleteUploadedFiles(files);
-          return res.status(400).json({
-            message: "Selected clinic does not belong to the chosen category",
-          });
-        }
-
-        resolvedCategoryId = category._id.toString();
-      } else {
-        resolvedCategoryId = clinic.dermaCategory.toString();
-      }
 
       const created = await Offer3.insertMany(
         files.map((file) => ({
           imageUrl: getUploadedPath(file),
-          clinicId: clinic._id,
-          categoryId: resolvedCategoryId,
         }))
       );
 
@@ -110,7 +76,7 @@ router.post(
   }
 );
 
-// UPDATE OFFER
+// UPDATE OFFER — swaps the image only, no clinic/category link involved.
 router.put(
   "/:id",
   upload.single("image"),
@@ -120,41 +86,12 @@ router.put(
       if (!existing) return res.status(404).json({ message: "Offer not found" });
 
       const file = req.file;
-      const { clinicId, categoryId } = req.body;
       if (!file) return res.status(400).json({ message: "Image is required" });
 
       const updatePayload: any = {
         $set: { imageUrl: getUploadedPath(file) },
         $unset: { imageBase64: "" },
       };
-
-      if (clinicId) {
-        const clinic = await Clinic.findById(clinicId);
-        if (!clinic) {
-          await deleteStoredFile(updatePayload.$set.imageUrl);
-          return res.status(404).json({ message: "Clinic not found" });
-        }
-        updatePayload.$set.clinicId = clinic._id;
-
-        if (categoryId) {
-          const category = await ClinicCategory.findById(categoryId);
-          if (!category) {
-            await deleteStoredFile(updatePayload.$set.imageUrl);
-            return res.status(404).json({ message: "Category not found" });
-          }
-
-          if (clinic.dermaCategory.toString() !== category._id.toString()) {
-            await deleteStoredFile(updatePayload.$set.imageUrl);
-            return res.status(400).json({
-              message: "Selected clinic does not belong to the chosen category",
-            });
-          }
-
-          updatePayload.$set.categoryId = category._id;
-        } else {
-          updatePayload.$set.categoryId = clinic.dermaCategory;
-        }
-      }
 
       const updated = await Offer3.findByIdAndUpdate(req.params.id, updatePayload, {
         new: true,

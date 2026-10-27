@@ -271,6 +271,63 @@ router.post(
   }
 );
 
+/* ================= EDIT RESULT GALLERY ITEM ================= */
+router.put(
+  "/:id/result-gallery/:itemId",
+  upload.fields([
+    { name: "beforeImage", maxCount: 1 },
+    { name: "afterImage", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const user = await User.findById(req.params.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const item = (user.resultGallery || []).find(
+        (entry: any) => entry?._id?.toString() === req.params.itemId
+      ) as any;
+      if (!item) {
+        return res.status(404).json({ message: "Gallery item not found" });
+      }
+
+      const { title, note } = req.body;
+      if (typeof title === "string") item.title = title.trim();
+      if (typeof note === "string") item.note = note.trim();
+
+      const files = req.files as
+        | {
+            beforeImage?: Express.Multer.File[];
+            afterImage?: Express.Multer.File[];
+          }
+        | undefined;
+
+      const nextBeforeImage = getUploadedPath(files?.beforeImage?.[0]);
+      const nextAfterImage = getUploadedPath(files?.afterImage?.[0]);
+
+      if (nextBeforeImage) {
+        await deleteStoredFile(item.beforeImage);
+        item.beforeImage = nextBeforeImage;
+      }
+      if (nextAfterImage) {
+        await deleteStoredFile(item.afterImage);
+        item.afterImage = nextAfterImage;
+      }
+
+      await user.save();
+
+      res.json({
+        message: "Gallery item updated successfully",
+        resultGallery: user.resultGallery,
+      });
+    } catch (err: any) {
+      console.error("Update gallery error:", err);
+      res.status(500).json({ message: "Failed to update gallery item" });
+    }
+  }
+);
+
 /* ================= DELETE RESULT GALLERY ITEM ================= */
 router.delete("/:id/result-gallery/:itemId", async (req, res) => {
   try {
@@ -390,8 +447,10 @@ router.post(
         return res.status(400).json({ message: "Prescription PDF is required" });
       }
 
-      if (req.file.mimetype !== "application/pdf") {
-        return res.status(400).json({ message: "Only PDF files are allowed" });
+      const isSupported =
+        req.file.mimetype === "application/pdf" || req.file.mimetype.startsWith("image/");
+      if (!isSupported) {
+        return res.status(400).json({ message: "Only PDF or image files are allowed" });
       }
 
       const user = await User.findById(req.params.id);
@@ -401,6 +460,7 @@ router.post(
 
       user.prescriptions = user.prescriptions || [];
       user.prescriptions.unshift({
+        label: String(req.body.label || "").trim(),
         fileName: req.file.originalname,
         fileUrl: getUploadedPath(req.file) || "",
         fileType: req.file.mimetype,

@@ -23,3 +23,27 @@ export const getActiveSubscriptionClinicIds = async (clinicIds: string[]) => {
   }).select("clinicId");
   return new Set(activeSubs.map((sub) => String(sub.clinicId)));
 };
+
+export type ActiveSubscriptionDetail = { hasAddons: boolean };
+
+/** Same "active subscription" lookup as getActiveSubscriptionClinicIds, but
+ * also reports whether each clinic's current plan includes add-ons — used
+ * to rank the Find Clinics page: plan + add-ons > plan only > no plan. */
+export const getActiveSubscriptionDetails = async (
+  clinicIds: string[]
+): Promise<Map<string, ActiveSubscriptionDetail>> => {
+  const map = new Map<string, ActiveSubscriptionDetail>();
+  if (clinicIds.length === 0) return map;
+
+  const activeSubs = await ClinicSubscription.find({
+    clinicId: { $in: clinicIds },
+    status: "active",
+    endDate: { $gte: new Date() },
+  }).select("clinicId addons");
+
+  activeSubs.forEach((sub) => {
+    map.set(String(sub.clinicId), { hasAddons: (sub.addons || []).length > 0 });
+  });
+
+  return map;
+};

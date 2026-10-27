@@ -11,6 +11,11 @@ export interface IDoctor extends Document {
   description?: string;
   profileImage?: string;
   address?: string;
+  // Prescription letterhead fields — shown on the "Rx" PDF sent via chat.
+  qualification?: string;
+  registrationNo?: string;
+  clinicName?: string;
+  clinicAddress?: string;
   // Doctor-controlled toggle (Doctor Dashboard) — whether they're currently
   // available to be matched for an on-demand online consultation "Connect"
   // request. Distinct from raw socket presence, which just reflects whether
@@ -90,6 +95,26 @@ const DoctorSchema = new Schema<IDoctor>(
     },
 
     address: {
+      type: String,
+      trim: true,
+    },
+
+    qualification: {
+      type: String,
+      trim: true,
+    },
+
+    registrationNo: {
+      type: String,
+      trim: true,
+    },
+
+    clinicName: {
+      type: String,
+      trim: true,
+    },
+
+    clinicAddress: {
       type: String,
       trim: true,
     },

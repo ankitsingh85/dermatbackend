@@ -376,7 +376,9 @@ router.get("/public", async (req: Request, res: Response) => {
     }
 
     const coupons = await Coupon.find(query)
-      .select("couponCode couponName discountType discountValue serviceSection subService cartValue maxDiscount")
+      .select(
+        "couponCode couponName discountType discountValue serviceSection subService cartValue maxDiscount expiryDate"
+      )
       .sort({ createdAt: -1 });
 
     return res.json(coupons);

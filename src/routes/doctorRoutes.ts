@@ -210,6 +210,19 @@ router.get("/", async (_req, res) => {
   }
 });
 
+/* ================= GET DOCTOR BY ID ================= */
+// Unauthenticated — used by the doctor chat (prescription modal) which only
+// has a raw doctorId from localStorage, not a doctor auth session token.
+router.get("/:id", async (req, res) => {
+  try {
+    const doctor = await Doctor.findById(req.params.id);
+    if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+    res.json(buildDoctorPayload(doctor));
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error });
+  }
+});
+
 /* ================= UPDATE DOCTOR ================= */
 router.put("/:id", upload.single("profileImage"), async (req, res) => {
   try {

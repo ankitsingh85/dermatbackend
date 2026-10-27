@@ -86,6 +86,10 @@ export const buildDoctorPayload = (doctor: any, fallbackPhone?: string) => {
     description: doctor?.description || "",
     profileImage: doctor?.profileImage || "",
     address: doctor?.address || "",
+    qualification: doctor?.qualification || "",
+    registrationNo: doctor?.registrationNo || "",
+    clinicName: doctor?.clinicName || "",
+    clinicAddress: doctor?.clinicAddress || "",
     isAvailableForConsultation: Boolean(doctor?.isAvailableForConsultation),
     addresses: Array.isArray(doctor?.addresses)
       ? doctor.addresses.map(normalizeAddress)
