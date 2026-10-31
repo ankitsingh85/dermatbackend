@@ -5,6 +5,7 @@ import Coupon from "../models/coupon";
 import User from "../models/user";
 import B2BUser from "../models/B2BUser";
 import Clinic from "../models/clinic";
+import ClinicSubscription from "../models/clinicSubscription";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
 import { sendMail } from "../utils/email";
 import {
@@ -85,6 +86,46 @@ const matchesOrderType = (order: any, requestedType?: string) => {
     !isConsultationLike(order) &&
     (hasItemType(order, "product") || orderType === "product")
   );
+};
+
+type TransactionCategory =
+  | "product"
+  | "treatment"
+  | "b2b"
+  | "consultation"
+  | "course"
+  | "workshop";
+
+const hasProductIdPrefix = (order: any, prefix: string) => {
+  const products = Array.isArray(order?.products) ? order.products : [];
+  return products.some((item: any) => String(item?.id || "").startsWith(prefix));
+};
+
+/** B2B is an owner-level split (who bought), checked before the
+ * item-level heuristics below (what they bought) — a business account's
+ * order belongs in "B2B Product" regardless of how its line items read.
+ * Checked by b2bUserId presence rather than ownerType alone — at least
+ * one real order has b2bUserId set but ownerType "clinic" (data drifted
+ * out of sync somewhere upstream), and the id is the more trustworthy
+ * signal of the two since it's a hard reference to a B2BUser document.
+ *
+ * Consultation is checked before treatment: isTreatmentLike()'s legacy
+ * fallback matches any order with address.type "Other" (a pre-orderType
+ * signal for old treatment bookings), but online consultation checkout
+ * also stamps address.type "Other" ("Online consultation booking — no
+ * delivery address required"), so treatment-first order would swallow
+ * every real consultation into "Treatment". orderType/itemType
+ * "consultation" is an explicit, non-heuristic signal, so it takes
+ * priority. Course/Workshop checkout never set a real orderType/itemType
+ * (see CartContext), so they're only identifiable by the
+ * "course:"/"workshop:" id prefix baked in at add-to-cart time. */
+const categorizeOrder = (order: any): TransactionCategory => {
+  if (order?.ownerType === "b2buser" || Boolean(order?.b2bUserId)) return "b2b";
+  if (isConsultationLike(order)) return "consultation";
+  if (isTreatmentLike(order)) return "treatment";
+  if (hasProductIdPrefix(order, "course:")) return "course";
+  if (hasProductIdPrefix(order, "workshop:")) return "workshop";
+  return "product";
 };
 
 // Resolves the buyer behind a saved order (by its own stored ownerType and
@@ -527,6 +568,136 @@ router.get("/all", async (_req, res) => {
   } catch (err: any) {
     console.error("❌ Error fetching all orders:", err.message);
     res.status(500).json({ message: "Failed to fetch all orders", error: err.message });
+  }
+});
+
+/** Clinic subscription purchases don't go through the Order model at all
+ * (clinicSubscriptionRoutes.ts writes straight to ClinicSubscription on a
+ * verified Razorpay payment), so they're fetched and reshaped into the
+ * same { products, totalAmount, paymentStatus, status, category, ... }
+ * shape as a regular order here, rather than teaching categorizeOrder()
+ * about a collection it was never meant to see. Every historical purchase
+ * is included — not just each clinic's latest/current plan — so this is
+ * the complete purchase history, add-ons included as their own line items. */
+const SUBSCRIPTION_STATUS_LABEL: Record<string, string> = {
+  active: "Active",
+  paused: "Paused",
+  cancelled: "Cancelled",
+  expired: "Expired",
+};
+
+const subscriptionDisplayStatus = (sub: any): string => {
+  if (sub.status === "cancelled" && new Date(sub.endDate).getTime() < Date.now()) {
+    return "Expired";
+  }
+  if (sub.status === "active" && new Date(sub.endDate).getTime() < Date.now()) {
+    return "Expired";
+  }
+  return SUBSCRIPTION_STATUS_LABEL[sub.status] || "Active";
+};
+
+const fetchClinicSubscriptionTransactions = async () => {
+  const subscriptions = await ClinicSubscription.find()
+    .populate("clinicId", "clinicName email contactNumber")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return subscriptions.map((sub: any) => ({
+    _id: String(sub._id),
+    orderType: "clinic-subscription",
+    ownerType: "clinic",
+    products: [
+      {
+        id: String(sub._id),
+        name: `${sub.planName} (${sub.billingCycle})`,
+        quantity: 1,
+        price: sub.planAmount ?? sub.amount,
+        itemType: "clinic-subscription",
+      },
+      ...(Array.isArray(sub.addons)
+        ? sub.addons.map((addon: any) => ({
+            id: String(addon.addonId || addon.name),
+            name: `Add-on: ${addon.name}`,
+            quantity: 1,
+            price: addon.price,
+            itemType: "clinic-subscription-addon",
+          }))
+        : []),
+    ],
+    totalAmount: sub.amount,
+    paymentStatus: sub.razorpayPaymentId ? "success" : "pending",
+    status: subscriptionDisplayStatus(sub),
+    createdAt: sub.createdAt,
+    category: "clinicSubscription" as const,
+    userId: null,
+    clinicId: sub.clinicId || null,
+    b2bUserId: null,
+    subscriptionMeta: {
+      billingCycle: sub.billingCycle,
+      startDate: sub.startDate,
+      endDate: sub.endDate,
+    },
+  }));
+};
+
+/** ✅ ADMIN: Transactions report — every order tagged with a derived
+ * `category` (product/treatment/b2b/consultation/course/workshop) plus
+ * every clinic subscription purchase (category "clinicSubscription", see
+ * fetchClinicSubscriptionTransactions above), so the admin Transactions
+ * tab can split revenue by category without re-implementing these
+ * heuristics on the frontend. "Online Test" isn't a possible value here —
+ * the platform has no purchasable online-test feature yet (no catalog
+ * model, no checkout wiring), so that tab is always an empty state on the
+ * frontend. */
+router.get("/admin/transactions", async (_req, res) => {
+  try {
+    // b2bUserId is intentionally NOT populated in this query — some
+    // orders reference a B2BUser that's since been deleted, and
+    // Mongoose's .populate() silently resolves a dangling ref to null,
+    // which would erase the very signal categorizeOrder() needs to tell
+    // a B2B order apart. The raw id is resolved manually below instead,
+    // after categorization has already run on it.
+    const orders = await Order.find()
+      .populate("userId", "name email")
+      .populate("clinicId", "clinicName email contactNumber")
+      .sort({ createdAt: -1 });
+
+    const b2bUserIds = Array.from(
+      new Set(
+        orders
+          .map((order) => (order as any).b2bUserId)
+          .filter(Boolean)
+          .map((id) => String(id))
+      )
+    );
+    const b2bUsers = b2bUserIds.length
+      ? await B2BUser.find({ _id: { $in: b2bUserIds } }).select(
+          "name contactPerson email contactNo"
+        )
+      : [];
+    const b2bUserMap = new Map(b2bUsers.map((u) => [String(u._id), u]));
+
+    const withCategory = orders.map((order) => {
+      const plain = order.toObject();
+      const category = categorizeOrder(plain);
+      const rawB2bUserId = (order as any).b2bUserId;
+      return {
+        ...plain,
+        b2bUserId: rawB2bUserId ? b2bUserMap.get(String(rawB2bUserId)) || null : null,
+        category,
+      };
+    });
+
+    const subscriptionTransactions = await fetchClinicSubscriptionTransactions();
+
+    const combined = [...withCategory, ...subscriptionTransactions].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    res.status(200).json(combined);
+  } catch (err: any) {
+    console.error("❌ Error fetching transactions:", err.message);
+    res.status(500).json({ message: "Failed to fetch transactions", error: err.message });
   }
 });
 

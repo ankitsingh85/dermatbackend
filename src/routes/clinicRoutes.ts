@@ -333,6 +333,7 @@ const attachSubscriptionFlags = async (clinics: any[]) => {
       ...clinic,
       whatsappVisible: resolveOverride(clinic?.whatsappOverride, hasActiveSub),
       verifiedBadgeVisible: resolveOverride(clinic?.verifiedBadgeOverride, hasActiveSub),
+      callButtonVisible: resolveOverride(clinic?.callButtonOverride, hasActiveSub),
       // Used by the Find Clinics page to rank: plan + add-ons first, plan
       // only next, no plan last — then by distance within each group.
       hasActiveSubscription: hasActiveSub,

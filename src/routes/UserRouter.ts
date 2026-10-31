@@ -2,8 +2,12 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import User from "../models/user";
+import Product from "../models/Products";
+import TreatmentPlan from "../models/treatmentplans";
+import OnlineConsultationService from "../models/onlineConsultationService";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
 import upload from "../middleware/uploads";
+import { generateQuizAssessmentPdf } from "../utils/generateQuizAssessmentPdf";
 
 const router = express.Router();
 
@@ -500,6 +504,205 @@ router.delete("/:id/prescriptions/:itemId", async (req, res) => {
   } catch (err: any) {
     console.error("Delete prescription error:", err);
     res.status(500).json({ message: "Failed to delete prescription" });
+  }
+});
+
+/* ================= SAVE QUIZ ASSESSMENT REPORT ================= */
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+
+const slugify = (value: string) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const generateReportId = () => Math.random().toString(36).slice(2, 11).toUpperCase();
+
+// "Rs." rather than "₹" — pdfkit's standard fonts don't cover the Rupee
+// sign glyph (U+20B9) and render it as a broken superscript character.
+const formatMoney = (value: number) => `Rs. ${Number(value || 0).toLocaleString("en-IN")}`;
+
+const stripHtml = (value?: string) =>
+  String(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+router.post("/:id/quiz-reports", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const {
+      testType,
+      startedAt,
+      completedAt,
+      profileTitle,
+      profileDescription,
+      mainConcerns,
+      primaryNextStep,
+      indicators,
+      factors,
+      interpretation,
+      nextSteps,
+      routineTitle,
+      routineGuidance,
+      clinicianReview,
+      followUp,
+      photoUploadStatus,
+      questions,
+    } = req.body;
+
+    if (testType !== "hair" && testType !== "skin") {
+      return res.status(400).json({ message: "testType must be 'hair' or 'skin'" });
+    }
+    if (!profileTitle || !Array.isArray(indicators) || !Array.isArray(questions)) {
+      return res.status(400).json({ message: "Missing required assessment report fields" });
+    }
+
+    // Only ever recommend real, currently-live catalogue items — never
+    // fabricate a package/product/consultation when nothing matches.
+    const categoryMatch = testType === "hair" ? /hair/i : /skin/i;
+
+    const matchedTreatments = await TreatmentPlan.find({
+      $or: [{ treatmentName: categoryMatch }, { serviceCategory: categoryMatch }],
+    })
+      .limit(2)
+      .lean();
+
+    const matchedProducts = await Product.find({
+      $or: [{ productName: categoryMatch }, { category: categoryMatch }, { targetConcerns: categoryMatch }],
+    })
+      .limit(2)
+      .lean();
+
+    const matchedConsultation = await OnlineConsultationService.findOne({
+      isActive: true,
+      serviceType: categoryMatch,
+    }).lean();
+    const fallbackConsultation = matchedConsultation
+      ? null
+      : await OnlineConsultationService.findOne({ isActive: true }).lean();
+    const consultationDoc = matchedConsultation || fallbackConsultation;
+
+    const reportId = generateReportId();
+    const now = new Date();
+
+    const fileName = await generateQuizAssessmentPdf({
+      reportId,
+      customerName: user.name || "Customer",
+      testType,
+      status: "Completed",
+      startedAt: new Date(startedAt),
+      completedAt: new Date(completedAt),
+      generatedAt: now,
+      profileTitle,
+      profileDescription: profileDescription || "",
+      mainConcerns: Array.isArray(mainConcerns) ? mainConcerns : [],
+      primaryNextStep: primaryNextStep || "",
+      indicators,
+      factors: factors || "",
+      interpretation: interpretation || "",
+      nextSteps: Array.isArray(nextSteps) ? nextSteps : [],
+      routineTitle: routineTitle || "",
+      routineGuidance: routineGuidance || "",
+      clinicianReview: clinicianReview || "",
+      followUp: followUp || "",
+      treatmentPackages: matchedTreatments.map((t: any) => ({
+        name: t.treatmentName,
+        shortDescription: stripHtml(t.description).slice(0, 160),
+        price: formatMoney(t.offerPrice ?? t.mrp ?? 0),
+        duration: t.duration || t.sessions || "-",
+        inclusions: Array.isArray(t.serviceCategory) ? t.serviceCategory.join(", ") : "",
+        url: `${FRONTEND_URL}/treatment-plans/${t.slug || slugify(t.treatmentName)}`,
+      })),
+      products: matchedProducts.map((p: any) => ({
+        name: p.productName,
+        purpose: stripHtml(p.targetConcerns) || (Array.isArray(p.category) ? p.category.join(", ") : ""),
+        price: formatMoney(p.discountedPrice ?? p.mrpPrice ?? 0),
+        url: `${FRONTEND_URL}/product/${p._id}`,
+      })),
+      consultation: consultationDoc
+        ? {
+            serviceName: (consultationDoc as any).serviceType,
+            shortDescription: "Speak to a dermatologist online about your results.",
+            fee: formatMoney((consultationDoc as any).offerPrice ?? (consultationDoc as any).consultationFee ?? 0),
+            bookingUrl: `${FRONTEND_URL}/video-consultation`,
+          }
+        : null,
+      questions,
+      photoUploadStatus: photoUploadStatus || "Not provided",
+      assessmentEngineVersion: "1.0",
+      scoringVersion: "1.0",
+      privacyContact: `${FRONTEND_URL}/privacy-policy`,
+    });
+
+    user.quizReports = user.quizReports || [];
+    user.quizReports.unshift({
+      reportId,
+      testType,
+      startedAt: new Date(startedAt),
+      completedAt: new Date(completedAt),
+      profileTitle,
+      profileDescription: profileDescription || "",
+      mainConcerns: Array.isArray(mainConcerns) ? mainConcerns : [],
+      indicators,
+      factors: factors || "",
+      interpretation: interpretation || "",
+      nextSteps: Array.isArray(nextSteps) ? nextSteps : [],
+      routineTitle: routineTitle || "",
+      routineGuidance: routineGuidance || "",
+      clinicianReview: clinicianReview || "",
+      followUp: followUp || "",
+      photoUploadStatus: photoUploadStatus || "Not provided",
+      questions,
+      fileUrl: `/uploads/${fileName}`,
+      fileName: `Assessment-Report-${reportId}.pdf`,
+      createdAt: now,
+    } as any);
+
+    await user.save();
+
+    res.status(201).json({
+      message: "Assessment report saved successfully",
+      quizReports: user.quizReports,
+    });
+  } catch (err: any) {
+    console.error("Save quiz report error:", err);
+    res.status(500).json({ message: "Failed to save assessment report" });
+  }
+});
+
+/* ================= DELETE QUIZ ASSESSMENT REPORT ================= */
+router.delete("/:id/quiz-reports/:itemId", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const target = (user.quizReports || []).find(
+      (item: any) => item?._id?.toString() === req.params.itemId
+    );
+    if (target) {
+      await deleteStoredFile(target.fileUrl);
+    }
+
+    user.quizReports = (user.quizReports || []).filter(
+      (item: any) => item?._id?.toString() !== req.params.itemId
+    );
+    await user.save();
+
+    res.json({
+      message: "Assessment report deleted successfully",
+      quizReports: user.quizReports,
+    });
+  } catch (err: any) {
+    console.error("Delete quiz report error:", err);
+    res.status(500).json({ message: "Failed to delete assessment report" });
   }
 });
 

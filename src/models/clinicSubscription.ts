@@ -18,7 +18,8 @@ export interface IClinicSubscription extends Document {
   addons: ISubscriptionAddonSnapshot[];
   startDate: Date;
   endDate: Date;
-  status: "active" | "expired" | "cancelled";
+  status: "active" | "expired" | "cancelled" | "paused";
+  pausedAt?: Date;
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
@@ -48,7 +49,8 @@ const ClinicSubscriptionSchema = new Schema<IClinicSubscription>(
     addons: { type: [SubscriptionAddonSnapshotSchema], default: [] },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
-    status: { type: String, enum: ["active", "expired", "cancelled"], default: "active" },
+    status: { type: String, enum: ["active", "expired", "cancelled", "paused"], default: "active" },
+    pausedAt: { type: Date },
     razorpayOrderId: { type: String, trim: true },
     razorpayPaymentId: { type: String, trim: true },
     razorpaySignature: { type: String, trim: true },

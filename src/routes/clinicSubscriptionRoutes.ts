@@ -221,6 +221,65 @@ router.post("/purchase", clinicAuth, async (req: AuthRequest, res: Response) => 
   }
 });
 
+/** Clinic: attach new add-ons to the CURRENT active subscription, without
+ * re-charging the plan price or resetting the billing cycle/dates. Used
+ * when a clinic already has an active plan and only wants to add more
+ * add-ons mid-cycle — /purchase would otherwise cancel the active row and
+ * start a brand new (and re-paid) cycle. */
+router.post("/add-addons", clinicAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const clinicId = req.clinic?.id;
+    if (!clinicId || !mongoose.Types.ObjectId.isValid(clinicId)) {
+      return res.status(401).json({ message: "Invalid clinic session" });
+    }
+
+    const { addonIds, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      return res.status(400).json({ message: "Missing payment details" });
+    }
+
+    const subscription = await ClinicSubscription.findOne({
+      clinicId,
+      status: "active",
+      endDate: { $gte: new Date() },
+    }).sort({ createdAt: -1 });
+    if (!subscription) {
+      return res.status(400).json({ message: "No active subscription to add add-ons to" });
+    }
+
+    const existingAddonIds = new Set((subscription.addons || []).map((a) => String(a.addonId)));
+    const requestedAddonIds = Array.isArray(addonIds)
+      ? addonIds.filter(
+          (id: unknown) => mongoose.Types.ObjectId.isValid(String(id)) && !existingAddonIds.has(String(id))
+        )
+      : [];
+    if (requestedAddonIds.length === 0) {
+      return res.status(400).json({ message: "No new add-ons to add" });
+    }
+
+    const newAddons = await ClinicSubscriptionAddon.find({
+      _id: { $in: requestedAddonIds },
+      isActive: true,
+    });
+    if (newAddons.length === 0) {
+      return res.status(400).json({ message: "Selected add-ons are not available" });
+    }
+
+    const addedCost = newAddons.reduce((sum, addon) => sum + addon.price, 0);
+    subscription.addons.push(
+      ...newAddons.map((addon) => ({ addonId: addon._id, name: addon.name, price: addon.price }))
+    );
+    subscription.addonsAmount = (subscription.addonsAmount || 0) + addedCost;
+    subscription.amount = (subscription.amount || 0) + addedCost;
+    await subscription.save();
+
+    res.json({ subscription, message: "Add-on(s) added to your active plan" });
+  } catch (err: any) {
+    console.error("❌ Error adding add-ons to subscription:", err.message);
+    res.status(500).json({ message: "Failed to add add-ons", error: err.message });
+  }
+});
+
 /** Clinic: own current subscription status. */
 router.get("/clinic/:clinicId", clinicAuth, async (req: AuthRequest, res: Response) => {
   try {
@@ -234,7 +293,7 @@ router.get("/clinic/:clinicId", clinicAuth, async (req: AuthRequest, res: Respon
 
     const subscription = await ClinicSubscription.findOne({ clinicId }).sort({ createdAt: -1 });
     const clinic = await Clinic.findById(clinicId).select(
-      "whatsappOverride leadAccessOverride verifiedBadgeOverride"
+      "whatsappOverride leadAccessOverride verifiedBadgeOverride callButtonOverride"
     );
 
     let isActive = false;
@@ -251,10 +310,38 @@ router.get("/clinic/:clinicId", clinicAuth, async (req: AuthRequest, res: Respon
     const whatsappVisible = resolveOverride(clinic?.whatsappOverride, isActive);
     const leadAccessVisible = resolveOverride(clinic?.leadAccessOverride, isActive);
     const verifiedBadgeVisible = resolveOverride(clinic?.verifiedBadgeOverride, isActive);
+    const callButtonVisible = resolveOverride(clinic?.callButtonOverride, isActive);
 
-    res.json({ subscription, isActive, whatsappVisible, leadAccessVisible, verifiedBadgeVisible });
+    res.json({
+      subscription,
+      isActive,
+      whatsappVisible,
+      leadAccessVisible,
+      verifiedBadgeVisible,
+      callButtonVisible,
+    });
   } catch (err: any) {
     res.status(500).json({ message: "Failed to fetch subscription", error: err.message });
+  }
+});
+
+/** Clinic: full purchase history (every subscription ever bought, not just
+ * the current one) — each row carries its own invoice download via
+ * /clinic-subscriptions/:subscriptionId/invoice. */
+router.get("/clinic/:clinicId/history", clinicAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { clinicId } = req.params;
+    if (clinicId !== req.clinic?.id) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(clinicId)) {
+      return res.status(400).json({ message: "Invalid clinicId" });
+    }
+
+    const history = await ClinicSubscription.find({ clinicId }).sort({ createdAt: -1 });
+    res.json(history);
+  } catch (err: any) {
+    res.status(500).json({ message: "Failed to fetch subscription history", error: err.message });
   }
 });
 
@@ -263,7 +350,7 @@ router.get("/admin/all", async (_req: Request, res: Response) => {
   try {
     const clinics = await Clinic.find()
       .select(
-        "clinicName contactNumber whatsapp whatsappOverride leadAccessOverride verifiedBadgeOverride"
+        "clinicName contactNumber whatsapp whatsappOverride leadAccessOverride verifiedBadgeOverride callButtonOverride"
       )
       .lean();
 
@@ -286,9 +373,11 @@ router.get("/admin/all", async (_req: Request, res: Response) => {
         whatsappOverride: clinic.whatsappOverride || "auto",
         leadAccessOverride: clinic.leadAccessOverride || "auto",
         verifiedBadgeOverride: clinic.verifiedBadgeOverride || "auto",
+        callButtonOverride: clinic.callButtonOverride || "auto",
         whatsappVisible: resolveOverride(clinic.whatsappOverride, isActive),
         leadAccessVisible: resolveOverride(clinic.leadAccessOverride, isActive),
         verifiedBadgeVisible: resolveOverride(clinic.verifiedBadgeOverride, isActive),
+        callButtonVisible: resolveOverride(clinic.callButtonOverride, isActive),
         subscription: sub || null,
         isActive,
       };
@@ -300,11 +389,16 @@ router.get("/admin/all", async (_req: Request, res: Response) => {
   }
 });
 
-const OVERRIDE_FIELDS = ["whatsappOverride", "leadAccessOverride", "verifiedBadgeOverride"] as const;
+const OVERRIDE_FIELDS = [
+  "whatsappOverride",
+  "leadAccessOverride",
+  "verifiedBadgeOverride",
+  "callButtonOverride",
+] as const;
 
-/** Admin: force the WhatsApp button, Lead dashboard access, or verified
- * badge on/off for a clinic, or hand control back to the plan. Accepts
- * any subset of the three override fields in the body. */
+/** Admin: force the WhatsApp button, Lead dashboard access, verified
+ * badge, or Call button on/off for a clinic, or hand control back to the
+ * plan. Accepts any subset of the four override fields in the body. */
 router.put("/admin/override/:clinicId", async (req: Request, res: Response) => {
   try {
     const { clinicId } = req.params;
@@ -327,7 +421,7 @@ router.put("/admin/override/:clinicId", async (req: Request, res: Response) => {
     }
 
     const clinic = await Clinic.findByIdAndUpdate(clinicId, { $set: updates }, { new: true }).select(
-      "clinicName whatsappOverride leadAccessOverride verifiedBadgeOverride"
+      "clinicName whatsappOverride leadAccessOverride verifiedBadgeOverride callButtonOverride"
     );
 
     if (!clinic) return res.status(404).json({ message: "Clinic not found" });
@@ -355,6 +449,91 @@ router.put("/admin/cancel/:subscriptionId", async (req: Request, res: Response) 
     res.json(subscription);
   } catch (err: any) {
     res.status(500).json({ message: "Failed to cancel subscription", error: err.message });
+  }
+});
+
+/** Admin: temporarily suspend plan benefits without losing the remaining
+ * paid period — endDate is pushed forward by however long it stays paused. */
+router.put("/admin/pause/:subscriptionId", async (req: Request, res: Response) => {
+  try {
+    const { subscriptionId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
+      return res.status(400).json({ message: "Invalid subscriptionId" });
+    }
+
+    const subscription = await ClinicSubscription.findById(subscriptionId);
+    if (!subscription) return res.status(404).json({ message: "Subscription not found" });
+    if (subscription.status !== "active") {
+      return res.status(400).json({ message: "Only an active subscription can be paused" });
+    }
+
+    subscription.status = "paused";
+    subscription.pausedAt = new Date();
+    await subscription.save();
+
+    res.json(subscription);
+  } catch (err: any) {
+    res.status(500).json({ message: "Failed to pause subscription", error: err.message });
+  }
+});
+
+/** Admin: resume a paused subscription. The time it spent paused is added
+ * back onto endDate so the clinic doesn't lose paid-for days. */
+router.put("/admin/resume/:subscriptionId", async (req: Request, res: Response) => {
+  try {
+    const { subscriptionId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
+      return res.status(400).json({ message: "Invalid subscriptionId" });
+    }
+
+    const subscription = await ClinicSubscription.findById(subscriptionId);
+    if (!subscription) return res.status(404).json({ message: "Subscription not found" });
+    if (subscription.status !== "paused") {
+      return res.status(400).json({ message: "Only a paused subscription can be resumed" });
+    }
+
+    const pausedMs = subscription.pausedAt ? Date.now() - subscription.pausedAt.getTime() : 0;
+    subscription.endDate = new Date(subscription.endDate.getTime() + Math.max(pausedMs, 0));
+    subscription.status = "active";
+    subscription.pausedAt = undefined;
+    await subscription.save();
+
+    res.json(subscription);
+  } catch (err: any) {
+    res.status(500).json({ message: "Failed to resume subscription", error: err.message });
+  }
+});
+
+/** Admin: undo an accidental cancel — only while the paid period hasn't
+ * actually lapsed yet. Re-cancels any other "active" row for the same
+ * clinic first, since only one subscription should ever be active. */
+router.put("/admin/reactivate/:subscriptionId", async (req: Request, res: Response) => {
+  try {
+    const { subscriptionId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
+      return res.status(400).json({ message: "Invalid subscriptionId" });
+    }
+
+    const subscription = await ClinicSubscription.findById(subscriptionId);
+    if (!subscription) return res.status(404).json({ message: "Subscription not found" });
+    if (subscription.status !== "cancelled") {
+      return res.status(400).json({ message: "Only a cancelled subscription can be reactivated" });
+    }
+    if (subscription.endDate.getTime() < Date.now()) {
+      return res.status(400).json({ message: "This subscription's period has already expired" });
+    }
+
+    await ClinicSubscription.updateMany(
+      { clinicId: subscription.clinicId, status: "active", _id: { $ne: subscription._id } },
+      { $set: { status: "cancelled" } }
+    );
+
+    subscription.status = "active";
+    await subscription.save();
+
+    res.json(subscription);
+  } catch (err: any) {
+    res.status(500).json({ message: "Failed to reactivate subscription", error: err.message });
   }
 });
 

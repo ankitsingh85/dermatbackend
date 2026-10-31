@@ -56,6 +56,51 @@ export interface IUserTestReportItem {
   uploadedAt?: Date;
 }
 
+export interface IUserQuizIndicator {
+  label: string;
+  value: number;
+  interpretation: string;
+}
+
+export interface IUserQuizNextStep {
+  title: string;
+  description: string;
+}
+
+export interface IUserQuizQuestionAnswer {
+  category: string;
+  text: string;
+  selectedAnswer: string;
+}
+
+// A completed Hair/Skin self-assessment ("online test"), snapshotted at
+// submission time plus the generated "Rx"-style PDF report. Separate from
+// testReports (raw file uploads) — this is structured data the quiz engine
+// produced, not something the patient uploaded.
+export interface IUserQuizReportItem {
+  _id?: string;
+  reportId: string;
+  testType: "hair" | "skin";
+  startedAt: Date;
+  completedAt: Date;
+  profileTitle: string;
+  profileDescription: string;
+  mainConcerns: string[];
+  indicators: IUserQuizIndicator[];
+  factors: string;
+  interpretation: string;
+  nextSteps: IUserQuizNextStep[];
+  routineTitle: string;
+  routineGuidance: string;
+  clinicianReview: string;
+  followUp: string;
+  photoUploadStatus: string;
+  questions: IUserQuizQuestionAnswer[];
+  fileUrl: string;
+  fileName: string;
+  createdAt?: Date;
+}
+
 export interface IUser extends Document {
     patientId: string;
     name: string;
@@ -68,6 +113,7 @@ export interface IUser extends Document {
   resultGallery?: IUserResultGalleryItem[];
   prescriptions?: IUserPrescriptionItem[];
   testReports?: IUserTestReportItem[];
+  quizReports?: IUserQuizReportItem[];
   profileImage?: string; // uploaded file path only
   password?: string;
   comparePassword(password: string): Promise<boolean>;
@@ -174,6 +220,47 @@ const UserSchema = new Schema<IUser>(
         fileUrl: { type: String, required: true },
         fileType: { type: String, default: "application/pdf" },
         uploadedAt: { type: Date, default: () => new Date() },
+      },
+    ],
+    quizReports: [
+      {
+        reportId: { type: String, required: true },
+        testType: { type: String, enum: ["hair", "skin"], required: true },
+        startedAt: { type: Date, required: true },
+        completedAt: { type: Date, required: true },
+        profileTitle: { type: String, required: true },
+        profileDescription: { type: String, default: "" },
+        mainConcerns: [{ type: String }],
+        indicators: [
+          {
+            label: { type: String, required: true },
+            value: { type: Number, required: true },
+            interpretation: { type: String, default: "" },
+          },
+        ],
+        factors: { type: String, default: "" },
+        interpretation: { type: String, default: "" },
+        nextSteps: [
+          {
+            title: { type: String, required: true },
+            description: { type: String, default: "" },
+          },
+        ],
+        routineTitle: { type: String, default: "" },
+        routineGuidance: { type: String, default: "" },
+        clinicianReview: { type: String, default: "" },
+        followUp: { type: String, default: "" },
+        photoUploadStatus: { type: String, default: "Not provided" },
+        questions: [
+          {
+            category: { type: String, default: "" },
+            text: { type: String, default: "" },
+            selectedAnswer: { type: String, default: "" },
+          },
+        ],
+        fileUrl: { type: String, required: true },
+        fileName: { type: String, required: true },
+        createdAt: { type: Date, default: () => new Date() },
       },
     ],
     profileImage: { type: String, trim: true, default: "" },

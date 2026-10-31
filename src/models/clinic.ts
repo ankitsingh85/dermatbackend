@@ -78,6 +78,7 @@ export interface IClinic extends Document {
   whatsappOverride?: "auto" | "enabled" | "disabled";
   leadAccessOverride?: "auto" | "enabled" | "disabled";
   verifiedBadgeOverride?: "auto" | "enabled" | "disabled";
+  callButtonOverride?: "auto" | "enabled" | "disabled";
 
   // Admin approval gate for self-registered clinics. New signups start
   // "pending" and can't log in until an admin approves them; rejected
@@ -217,6 +218,11 @@ const ClinicSchema = new Schema<IClinic>(
       default: "auto",
     },
     verifiedBadgeOverride: {
+      type: String,
+      enum: ["auto", "enabled", "disabled"],
+      default: "auto",
+    },
+    callButtonOverride: {
       type: String,
       enum: ["auto", "enabled", "disabled"],
       default: "auto",
