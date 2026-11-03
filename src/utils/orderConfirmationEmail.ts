@@ -292,11 +292,9 @@ export const buildClinicTreatmentNotificationEmail = (
     ...(patientPhone ? [`- Phone: ${patientPhone}`] : []),
     "",
     "Treatment(s) Booked:",
-    ...items.map(
-      (item) => `- ${item.name} x${item.quantity} — ${formatCurrency(item.price * item.quantity)}`
-    ),
+    ...items.map((item) => `- ${item.name} x${item.quantity}`),
     "",
-    `Amount Paid Online: ${formatCurrency(amountPaid)}`,
+    "Payment: Paid online",
     ...(paymentId ? [`Payment ID: ${paymentId}`] : []),
     "",
     "Please expect the patient for this treatment and reach out if you need to confirm a visit slot.",
@@ -311,12 +309,9 @@ export const buildClinicTreatmentNotificationEmail = (
           <td style="padding:12px 0;border-bottom:1px solid #eef2f7;color:#163252;font-weight:600;">${escapeHtml(
             item.name
           )}</td>
-          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:center;color:#41556f;">x${
+          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:right;color:#41556f;">x${
             item.quantity
           }</td>
-          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:right;color:#163252;font-weight:600;">${formatCurrency(
-            item.price * item.quantity
-          )}</td>
         </tr>`
     )
     .join("");
@@ -373,8 +368,7 @@ export const buildClinicTreatmentNotificationEmail = (
           <thead>
             <tr>
               <th style="text-align:left;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Treatment</th>
-              <th style="text-align:center;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Qty</th>
-              <th style="text-align:right;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Amount</th>
+              <th style="text-align:right;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Qty</th>
             </tr>
           </thead>
           <tbody>
@@ -384,10 +378,8 @@ export const buildClinicTreatmentNotificationEmail = (
 
         <table style="width:100%;border-collapse:collapse;margin-top:16px;">
           <tr>
-            <td style="padding:12px 0 0;color:#163252;font-size:17px;font-weight:800;border-top:1px solid #eef2f7;">Amount Paid Online</td>
-            <td style="padding:12px 0 0;color:#0f9d58;font-size:17px;font-weight:800;text-align:right;border-top:1px solid #eef2f7;">${formatCurrency(
-              amountPaid
-            )}</td>
+            <td style="padding:12px 0 0;color:#163252;font-size:15px;font-weight:800;border-top:1px solid #eef2f7;">Payment</td>
+            <td style="padding:12px 0 0;color:#0f9d58;font-size:15px;font-weight:800;text-align:right;border-top:1px solid #eef2f7;">Paid online</td>
           </tr>
           ${
             paymentId
@@ -410,7 +402,7 @@ export const buildClinicTreatmentNotificationEmail = (
   </div>`;
 
   return {
-    subject: `New Treatment Booking — ${patientName || "Patient"} (${formatCurrency(amountPaid)})`,
+    subject: `New Treatment Booking — ${patientName || "Patient"}`,
     text: textLines.join("\n"),
     html,
   };
@@ -578,9 +570,7 @@ export const buildClinicTreatmentCancellationEmail = (
     ...(patientPhone ? [`- Phone: ${patientPhone}`] : []),
     "",
     "Treatment(s) Cancelled:",
-    ...items.map(
-      (item) => `- ${item.name} x${item.quantity} — ${formatCurrency(item.price * item.quantity)}`
-    ),
+    ...items.map((item) => `- ${item.name} x${item.quantity}`),
     "",
     "Please do not expect this patient for the above booking.",
     "",
@@ -594,12 +584,9 @@ export const buildClinicTreatmentCancellationEmail = (
           <td style="padding:12px 0;border-bottom:1px solid #eef2f7;color:#163252;font-weight:600;">${escapeHtml(
             item.name
           )}</td>
-          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:center;color:#41556f;">x${
+          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:right;color:#41556f;">x${
             item.quantity
           }</td>
-          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:right;color:#163252;font-weight:600;">${formatCurrency(
-            item.price * item.quantity
-          )}</td>
         </tr>`
     )
     .join("");
@@ -657,8 +644,7 @@ export const buildClinicTreatmentCancellationEmail = (
           <thead>
             <tr>
               <th style="text-align:left;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Treatment</th>
-              <th style="text-align:center;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Qty</th>
-              <th style="text-align:right;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Amount</th>
+              <th style="text-align:right;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Qty</th>
             </tr>
           </thead>
           <tbody>
