@@ -21,6 +21,11 @@ export interface IDoctor extends Document {
   // request. Distinct from raw socket presence, which just reflects whether
   // their browser tab is connected.
   isAvailableForConsultation?: boolean;
+  // Admin-controlled account toggle (List of Doctor in the admin panel).
+  // A disabled doctor can't log in and won't be matched for consultations —
+  // distinct from isAvailableForConsultation, which the doctor controls
+  // themselves to step away temporarily while still an active account.
+  isActive?: boolean;
   addresses?: {
     type: string;
     address?: string;
@@ -122,6 +127,11 @@ const DoctorSchema = new Schema<IDoctor>(
     isAvailableForConsultation: {
       type: Boolean,
       default: false,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
     },
 
     addresses: [

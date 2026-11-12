@@ -1,6 +1,7 @@
 import express from "express";
 import Chat from "../models/chat";
 import Message from "../models/message";
+import { resolveChatClosure } from "../utils/chatLifecycle";
 
 const router = express.Router();
 
@@ -12,6 +13,10 @@ const formatChatForDoctor = (chat: any) => ({
   requestedAt: chat.requestedAt,
   respondedAt: chat.respondedAt,
   updatedAt: chat.updatedAt,
+  source: chat.source || "direct",
+  consultationExpiresAt: chat.consultationExpiresAt || null,
+  closedAt: chat.closedAt || null,
+  closedBy: chat.closedBy || null,
 });
 
 router.post("/", async (req, res) => {
@@ -74,6 +79,38 @@ router.patch("/:chatId/status", async (req, res) => {
   }
 });
 
+// 👉 DOCTOR: End an online-consultation chat early. Once closed, no one can
+// send messages, attachments, prescriptions, or start a call in it again —
+// the same end state it would reach on its own after the 7-day window.
+router.patch("/:chatId/close", async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { doctorId } = req.body;
+
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ error: "Chat request not found." });
+    }
+    if (!doctorId || String(chat.doctorId) !== String(doctorId)) {
+      return res.status(403).json({ error: "You cannot close this chat." });
+    }
+    if (chat.source !== "consultation") {
+      return res.status(400).json({ error: "Only online-consultation chats can be closed." });
+    }
+    if (chat.closedAt) {
+      return res.json(formatChatForDoctor(chat));
+    }
+
+    chat.closedAt = new Date();
+    chat.closedBy = "doctor";
+    await chat.save();
+
+    res.json(formatChatForDoctor(chat));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.delete("/:chatId", async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -110,6 +147,7 @@ router.get("/user/:userId/doctor/:doctorId", async (req, res) => {
   try {
     const { userId, doctorId } = req.params;
     const chat = await Chat.findOne({ userId, doctorId });
+    if (chat) await resolveChatClosure(chat);
 
     res.json(chat || null);
   } catch (err: any) {
@@ -121,9 +159,18 @@ router.get("/doctor/:doctorId", async (req, res) => {
   try {
     const { doctorId } = req.params;
 
+    // Sorted by when the patient's booking/chat request came in, not by
+    // last message activity — otherwise a doctor's patient list reshuffles
+    // every time any one of them sends a new message, which makes multiple
+    // bookings for the same doctor impossible to track in order.
     const chats = await Chat.find({ doctorId })
       .populate("userId", "name email contactNo profileImage patientId")
-      .sort({ updatedAt: -1 });
+      .sort({ requestedAt: -1 });
+
+    // Lazily close any consultation chat whose 7-day window has passed —
+    // there's no background job, so this is resolved whenever the doctor's
+    // inbox is loaded instead.
+    await Promise.all(chats.map((chat) => resolveChatClosure(chat)));
 
     res.json(chats.map(formatChatForDoctor));
   } catch (err: any) {
