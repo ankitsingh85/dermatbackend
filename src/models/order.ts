@@ -37,6 +37,12 @@ export interface IOrder extends Document {
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
+  // Captured from Razorpay at verification time (payments.fetch) — the raw
+  // method ("card" | "upi" | "netbanking" | "wallet" | "emi" | ...) plus a
+  // human-readable summary ("UPI — name@bank", "Card — Visa ••1234", ...)
+  // for admin reporting, since Razorpay itself is the only source of this.
+  paymentMethod?: string;
+  paymentMethodDetails?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -116,6 +122,8 @@ const OrderSchema = new Schema<IOrder>(
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },
     razorpaySignature: { type: String },
+    paymentMethod: { type: String },
+    paymentMethodDetails: { type: String },
   },
   { timestamps: true }
 );

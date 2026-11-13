@@ -35,8 +35,34 @@ router.post("/create-order", async (req, res) => {
   }
 });
 
+// Razorpay's payments.fetch() returns method-specific sub-objects only for
+// the method actually used — this turns that into one readable line for
+// admin reporting, since nothing downstream can call Razorpay itself.
+const describePaymentMethod = (payment: any): string => {
+  const method = String(payment?.method || "").toLowerCase();
+  switch (method) {
+    case "upi":
+      return payment?.vpa ? `UPI — ${payment.vpa}` : "UPI";
+    case "card": {
+      const card = payment?.card || {};
+      const network = card.network || "Card";
+      const last4 = card.last4 ? ` ••${card.last4}` : "";
+      const type = card.type ? ` (${card.type})` : "";
+      return `${network}${last4}${type}`;
+    }
+    case "netbanking":
+      return payment?.bank ? `Netbanking — ${payment.bank}` : "Netbanking";
+    case "wallet":
+      return payment?.wallet ? `Wallet — ${payment.wallet}` : "Wallet";
+    case "emi":
+      return "EMI";
+    default:
+      return method ? method.charAt(0).toUpperCase() + method.slice(1) : "Unknown";
+  }
+};
+
 /** Verify the payment signature returned by Razorpay Checkout after a successful payment */
-router.post("/verify", (req, res) => {
+router.post("/verify", async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
@@ -53,7 +79,19 @@ router.post("/verify", (req, res) => {
       return res.status(400).json({ verified: false, message: "Payment verification failed" });
     }
 
-    res.status(200).json({ verified: true });
+    // Best-effort — the payment is already verified above, so a failure to
+    // fetch its method detail here shouldn't block checkout from completing.
+    let method: string | undefined;
+    let methodDetails: string | undefined;
+    try {
+      const payment = await razorpay.payments.fetch(razorpay_payment_id);
+      method = payment?.method;
+      methodDetails = describePaymentMethod(payment);
+    } catch (fetchErr: any) {
+      console.error("⚠️ Could not fetch payment method details:", fetchErr.message);
+    }
+
+    res.status(200).json({ verified: true, method, methodDetails });
   } catch (err: any) {
     console.error("❌ Error verifying payment:", err.message);
     res.status(500).json({ verified: false, message: "Verification error", error: err.message });

@@ -17,6 +17,11 @@ export interface IDoctor extends Document {
   updatedAt: Date;
 }
 
+
+
+
+
+
 const DoctorSchema: Schema = new Schema(
   {
     title: { type: String },

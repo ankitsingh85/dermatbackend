@@ -209,6 +209,8 @@ router.post("/", async (req, res) => {
       razorpayOrderId,
       razorpayPaymentId,
       razorpaySignature,
+      paymentMethod,
+      paymentMethodDetails,
     } = req.body;
 
     if ((!userId && !clinicId && !b2bUserId) || !products || !totalAmount || !address) {
@@ -248,6 +250,8 @@ router.post("/", async (req, res) => {
       razorpayOrderId,
       razorpayPaymentId,
       razorpaySignature,
+      paymentMethod,
+      paymentMethodDetails,
     });
 
     const savedOrder = await order.save();
