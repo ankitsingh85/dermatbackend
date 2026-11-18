@@ -340,11 +340,6 @@ router.post("/", async (req, res) => {
               .then((clinic) => {
                 if (!clinic?.email) return;
 
-                const amountForClinic = group.items.reduce(
-                  (sum, item) => sum + item.price * item.quantity,
-                  0
-                );
-
                 const { subject, text, html } = buildClinicTreatmentNotificationEmail({
                   clinicName: clinic.clinicName || group.clinicName || "",
                   orderId: String(savedOrder._id),
@@ -354,9 +349,7 @@ router.post("/", async (req, res) => {
                   items: group.items.map((item) => ({
                     name: item.name,
                     quantity: item.quantity,
-                    price: item.price,
                   })),
-                  amountPaid: amountForClinic,
                   paymentId: savedOrder.razorpayPaymentId,
                   createdAt: savedOrder.createdAt || new Date(),
                 });

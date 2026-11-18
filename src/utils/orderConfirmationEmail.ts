@@ -245,7 +245,6 @@ export const buildOrderConfirmationEmail = (input: OrderConfirmationInput) => {
 interface ClinicTreatmentNotificationItem {
   name: string;
   quantity: number;
-  price: number;
 }
 
 interface ClinicTreatmentNotificationInput {
@@ -255,14 +254,14 @@ interface ClinicTreatmentNotificationInput {
   patientEmail?: string;
   patientPhone?: string;
   items: ClinicTreatmentNotificationItem[];
-  amountPaid: number;
   paymentId?: string;
   createdAt: Date;
 }
 
 // Sent to the clinic a patient picked (via the clinic-selection step at
 // checkout) when a treatment booked at that clinic is paid for — so the
-// clinic knows who's coming, for what, and what was already paid online.
+// clinic knows who's coming and for what. Deliberately omits the price —
+// the clinic only needs the package and quantity to prepare for the visit.
 export const buildClinicTreatmentNotificationEmail = (
   input: ClinicTreatmentNotificationInput
 ) => {
@@ -273,7 +272,6 @@ export const buildClinicTreatmentNotificationEmail = (
     patientEmail,
     patientPhone,
     items,
-    amountPaid,
     paymentId,
     createdAt,
   } = input;
@@ -294,7 +292,6 @@ export const buildClinicTreatmentNotificationEmail = (
     "Treatment(s) Booked:",
     ...items.map((item) => `- ${item.name} x${item.quantity}`),
     "",
-    "Payment: Paid online",
     ...(paymentId ? [`Payment ID: ${paymentId}`] : []),
     "",
     "Please expect the patient for this treatment and reach out if you need to confirm a visit slot.",
@@ -376,22 +373,18 @@ export const buildClinicTreatmentNotificationEmail = (
           </tbody>
         </table>
 
-        <table style="width:100%;border-collapse:collapse;margin-top:16px;">
-          <tr>
-            <td style="padding:12px 0 0;color:#163252;font-size:15px;font-weight:800;border-top:1px solid #eef2f7;">Payment</td>
-            <td style="padding:12px 0 0;color:#0f9d58;font-size:15px;font-weight:800;text-align:right;border-top:1px solid #eef2f7;">Paid online</td>
-          </tr>
-          ${
-            paymentId
-              ? `<tr>
-                  <td style="padding:6px 0 0;color:#6d7f98;font-size:12px;">Payment ID</td>
-                  <td style="padding:6px 0 0;color:#6d7f98;font-size:12px;text-align:right;">${escapeHtml(
+        ${
+          paymentId
+            ? `<table style="width:100%;border-collapse:collapse;margin-top:16px;">
+                <tr>
+                  <td style="padding:12px 0 0;color:#6d7f98;font-size:12px;border-top:1px solid #eef2f7;">Payment ID</td>
+                  <td style="padding:12px 0 0;color:#6d7f98;font-size:12px;text-align:right;border-top:1px solid #eef2f7;">${escapeHtml(
                     paymentId
                   )}</td>
-                </tr>`
-              : ""
-          }
-        </table>
+                </tr>
+              </table>`
+            : ""
+        }
 
         <p style="margin:26px 0 0;color:#6d7f98;font-size:13px;line-height:1.6;">
           Please expect this patient for the treatment(s) above. If you need to confirm a visit
@@ -538,13 +531,19 @@ export const buildOrderCancellationEmail = (input: OrderCancellationInput) => {
   };
 };
 
+interface ClinicTreatmentCancellationItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
 interface ClinicTreatmentCancellationInput {
   clinicName: string;
   orderId: string;
   patientName: string;
   patientEmail?: string;
   patientPhone?: string;
-  items: ClinicTreatmentNotificationItem[];
+  items: ClinicTreatmentCancellationItem[];
   cancelledAt: Date;
 }
 
@@ -570,7 +569,9 @@ export const buildClinicTreatmentCancellationEmail = (
     ...(patientPhone ? [`- Phone: ${patientPhone}`] : []),
     "",
     "Treatment(s) Cancelled:",
-    ...items.map((item) => `- ${item.name} x${item.quantity}`),
+    ...items.map(
+      (item) => `- ${item.name} x${item.quantity} — ${formatCurrency(item.price * item.quantity)}`
+    ),
     "",
     "Please do not expect this patient for the above booking.",
     "",
@@ -584,9 +585,12 @@ export const buildClinicTreatmentCancellationEmail = (
           <td style="padding:12px 0;border-bottom:1px solid #eef2f7;color:#163252;font-weight:600;">${escapeHtml(
             item.name
           )}</td>
-          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:right;color:#41556f;">x${
+          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:center;color:#41556f;">x${
             item.quantity
           }</td>
+          <td style="padding:12px 0;border-bottom:1px solid #eef2f7;text-align:right;color:#163252;font-weight:600;">${formatCurrency(
+            item.price * item.quantity
+          )}</td>
         </tr>`
     )
     .join("");
@@ -644,7 +648,8 @@ export const buildClinicTreatmentCancellationEmail = (
           <thead>
             <tr>
               <th style="text-align:left;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Treatment</th>
-              <th style="text-align:right;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Qty</th>
+              <th style="text-align:center;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Qty</th>
+              <th style="text-align:right;padding-bottom:8px;border-bottom:2px solid #163252;font-size:12px;color:#6d7f98;text-transform:uppercase;">Amount</th>
             </tr>
           </thead>
           <tbody>
