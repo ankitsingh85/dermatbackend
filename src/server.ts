@@ -51,6 +51,7 @@ import trainingTypeRoutes from "./routes/trainingTypeRoutes";
 import hiringRequestRoutes from "./routes/hiringRequestRoutes";
 import supportTicketRoutes from "./routes/supportTicketRoutes";
 import featuredSectionRoutes from "./routes/featuredSectionRoutes";
+import b2bFeaturedSectionRoutes from "./routes/b2bFeaturedSectionRoutes";
 import Chat from "./models/chat";
 import Message from "./models/message";
 import { resolveChatClosure, isChatClosed } from "./utils/chatLifecycle";
@@ -129,6 +130,7 @@ app.use("/api/training-types", trainingTypeRoutes);
 app.use("/api/hiring-requests", hiringRequestRoutes);
 app.use("/api/support-tickets", supportTicketRoutes);
 app.use("/api/featured-section", featuredSectionRoutes);
+app.use("/api/b2b-featured-section", b2bFeaturedSectionRoutes);
 app.use("/api/clinic-reviews", clinicReviewRoutes);
 app.use("/api/treatment-reviews",treatmentReviewRoutes);
 
