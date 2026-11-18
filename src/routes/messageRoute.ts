@@ -4,6 +4,7 @@ import Message from "../models/message";
 import Chat from "../models/chat";
 import upload from "../middleware/uploads";
 import { generatePrescriptionPdf, PrescriptionMedicine } from "../utils/generatePrescriptionPdf";
+import { resolveChatClosure, isChatClosed } from "../utils/chatLifecycle";
 
 const router = express.Router();
 
@@ -38,6 +39,10 @@ router.post("/send-prescription", async (req, res) => {
     }
     if ((chat.status || "accepted") !== "accepted") {
       return res.status(403).json({ error: "Doctor must accept the chat request first." });
+    }
+    await resolveChatClosure(chat);
+    if (isChatClosed(chat)) {
+      return res.status(403).json({ error: "This consultation has been closed." });
     }
 
     const filename = await generatePrescriptionPdf({
@@ -115,6 +120,11 @@ router.post("/send-attachment", upload.single("file"), async (req, res) => {
       fs.unlink(file.path, () => {});
       return res.status(403).json({ error: "Doctor must accept the chat request first." });
     }
+    await resolveChatClosure(chat);
+    if (isChatClosed(chat)) {
+      fs.unlink(file.path, () => {});
+      return res.status(403).json({ error: "This consultation has been closed." });
+    }
 
     const newMessage = await Message.create({
       chatId,
@@ -138,6 +148,62 @@ router.post("/send-attachment", upload.single("file"), async (req, res) => {
   }
 });
 
+// 👉 Doctor suggests products/treatments — shown to the patient in-chat as
+// "Add to Cart" cards, same gating (chat must be accepted) as other sends.
+router.post("/send-recommendation", async (req, res) => {
+  try {
+    const { chatId, senderId, receiverId, recommendations } = req.body;
+
+    if (!chatId || !senderId || !receiverId || !Array.isArray(recommendations) || recommendations.length === 0) {
+      return res.status(400).json({ error: "chatId, senderId, receiverId and at least one recommendation are required." });
+    }
+
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ error: "Chat request not found." });
+    }
+    if ((chat.status || "accepted") !== "accepted") {
+      return res.status(403).json({ error: "Doctor must accept the chat request first." });
+    }
+    await resolveChatClosure(chat);
+    if (isChatClosed(chat)) {
+      return res.status(403).json({ error: "This consultation has been closed." });
+    }
+
+    const sanitized = recommendations
+      .filter((item: any) => item && item.itemId && item.name && (item.itemType === "product" || item.itemType === "treatment"))
+      .map((item: any) => ({
+        itemType: item.itemType,
+        itemId: String(item.itemId),
+        name: String(item.name),
+        image: item.image || undefined,
+        price: Number(item.price) || 0,
+        mrp: item.mrp != null ? Number(item.mrp) : undefined,
+      }));
+
+    if (sanitized.length === 0) {
+      return res.status(400).json({ error: "No valid recommendations provided." });
+    }
+
+    const newMessage = await Message.create({
+      chatId,
+      senderId,
+      receiverId,
+      message: "",
+      messageType: "recommendation",
+      recommendations: sanitized,
+    });
+
+    await Chat.findByIdAndUpdate(chatId, {
+      lastMessage: sanitized.length > 1 ? "💊 Suggested products/treatments" : `💊 Suggested ${sanitized[0].name}`,
+    });
+
+    res.json(newMessage);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 👉 Send message
 router.post("/send", async (req, res) => {
   try {
@@ -151,6 +217,10 @@ router.post("/send", async (req, res) => {
 
     if ((chat.status || "accepted") !== "accepted") {
       return res.status(403).json({ error: "Doctor must accept the chat request first." });
+    }
+    await resolveChatClosure(chat);
+    if (isChatClosed(chat)) {
+      return res.status(403).json({ error: "This consultation has been closed." });
     }
 
     const newMessage = await Message.create({

@@ -46,6 +46,11 @@ export interface IClinic extends Document {
   experience?: string;
   treatmentsAvailable?: string;
   availableServices?: string;
+  // Multi-select against the admin-managed ClinicService catalog — what
+  // actually drives the public clinic page's Services tab now, replacing
+  // the legacy free-text availableServices for clinics that have picked
+  // from the catalog.
+  clinicServices?: mongoose.Types.ObjectId[];
   consultationFee?: string;
   bookingMode?: string;
   clinicDescription?: string;
@@ -190,6 +195,10 @@ const ClinicSchema = new Schema<IClinic>(
 
     treatmentsAvailable: String,
     availableServices: String,
+    clinicServices: {
+      type: [{ type: Schema.Types.ObjectId, ref: "ClinicService" }],
+      default: [],
+    },
 
     consultationFee: String,
     bookingMode: String,

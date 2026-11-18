@@ -24,6 +24,7 @@ import offer2Routes from "./routes/treatmentOfferRoutes";
 import offer3Routes from "./routes/clinicOfferRoutes";
 import doctorAdminRoutes from "./routes/admindoctorRoutes";
 import serviceCategoryRoutes from "./routes/serviceCategoryRoutes";
+import clinicServiceRoutes from "./routes/clinicServiceRoutes";
 import onlineConsultationServiceRoutes from "./routes/onlineConsultationServiceRoutes";
 import clinicCategoryRoutes from "./routes/clinicCategoryRoutes";
 import clinicAuthRoutes from "./routes/clinicAuthRoutes";
@@ -36,6 +37,7 @@ import treatmentPlansRoutes from "./routes/treatmentplans";
 import couponRoutes from "./routes/couponRoutes";
 import clinicSubscriptionRoutes from "./routes/clinicSubscriptionRoutes";
 import orderRoutes from "./routes/orderRoutes";
+import treatmentCommissionRoutes from "./routes/treatmentCommissionRoutes";
 import doctorOrderRoutes from "./routes/doctorOrderRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
 import b2bCategoryRoutes from "./routes/b2bCategories";
@@ -51,6 +53,7 @@ import supportTicketRoutes from "./routes/supportTicketRoutes";
 import featuredSectionRoutes from "./routes/featuredSectionRoutes";
 import Chat from "./models/chat";
 import Message from "./models/message";
+import { resolveChatClosure, isChatClosed } from "./utils/chatLifecycle";
 import reviewRoutes from "./routes/b2breviewRoute";
 import clinicReviewRoutes from "./routes/clinicReviewRoute";
 // ✅ CHAT ROUTES
@@ -99,6 +102,7 @@ app.use("/api/offer2", offer2Routes);
 app.use("/api/offer3", offer3Routes);
 app.use("/api/doctoradmin", doctorAdminRoutes);
 app.use("/api/service-categories", serviceCategoryRoutes);
+app.use("/api/clinic-services", clinicServiceRoutes);
 app.use("/api/online-consultation-services", onlineConsultationServiceRoutes);
 app.use("/api/clinic-categories", clinicCategoryRoutes);
 app.use("/api/clinic-auth", clinicAuthRoutes);
@@ -111,6 +115,7 @@ app.use("/api/treatment-plans", treatmentPlansRoutes);
 app.use("/api/coupons", couponRoutes);
 app.use("/api/clinic-subscriptions", clinicSubscriptionRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/treatment-commissions", treatmentCommissionRoutes);
 app.use("/api/doctor-orders", doctorOrderRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/b2b-categories", b2bCategoryRoutes);
@@ -251,6 +256,17 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Doctor manually closed a consultation chat — relayed so the patient's
+  // chat window locks immediately instead of only finding out on their
+  // next failed send attempt.
+  socket.on("chat_closed", (data) => {
+    const receiverSocket = users.get(data.to);
+
+    if (receiverSocket) {
+      io.to(receiverSocket).emit("chat_closed", data);
+    }
+  });
+
   const emitToUser = (
     userId: string | undefined,
     eventName: string,
@@ -309,6 +325,40 @@ io.on("connection", (socket) => {
   };
 
   socket.on("call:invite", async (data) => {
+    // A closed consultation chat (manually ended, or past its 7-day
+    // window) can't start a new call any more than it can send a message.
+    if (data?.chatId) {
+      try {
+        const chat = await Chat.findById(data.chatId);
+        if (chat) {
+          await resolveChatClosure(chat);
+          if (isChatClosed(chat)) {
+            emitToUser(data.from, "call:unavailable", {
+              chatId: data.chatId,
+              callId: data.callId,
+              to: data.to,
+              reason: "chat-closed",
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Chat closure check error:", err);
+      }
+    }
+
+    // The callee's socket is only tracked while they're actually connected
+    // (registered) — if they're offline right now, tell the caller
+    // immediately instead of letting the call ring forever with no answer.
+    if (data?.to && !users.has(data.to)) {
+      emitToUser(data.from, "call:unavailable", {
+        chatId: data.chatId,
+        callId: data.callId,
+        to: data.to,
+      });
+      return;
+    }
+
     try {
       const callMessage = await createCallHistoryMessage(data);
 

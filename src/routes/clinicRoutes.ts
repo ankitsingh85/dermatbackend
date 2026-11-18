@@ -375,6 +375,7 @@ router.post(
       video,
       verifiedBadge,
       isActive,
+      clinicServices,
       ...rest
     } = req.body;
 
@@ -410,6 +411,7 @@ router.post(
 
     const parsedDoctors = normalizeDoctors(doctors);
     const parsedWorkingHours = parseWorkingHours(workingHours);
+    const parsedClinicServices = parseStringArray(clinicServices);
 
     // CUC now uses a fixed "ClinicName" prefix + current year/month + a
     // global sequence number that increments per month, e.g.
@@ -459,6 +461,7 @@ location?.longitude || null,
       whatsapp: normalizedWhatsapp,
       doctors: parsedDoctors,
       workingHours: parsedWorkingHours,
+      clinicServices: parsedClinicServices,
       clinicLogo: uploadedClinicLogo[0] || undefined,
       bannerImage: uploadedBannerImage[0] || undefined,
       rateCard: uploadedRateCard,
@@ -856,16 +859,14 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const identifier = req.params.id;
-    let clinic = await Clinic.findOne({ slug: identifier }).populate(
-      "dermaCategory",
-      "name"
-    );
+    let clinic = await Clinic.findOne({ slug: identifier })
+      .populate("dermaCategory", "name")
+      .populate("clinicServices");
 
     if (!clinic && mongoose.Types.ObjectId.isValid(identifier)) {
-      clinic = await Clinic.findById(identifier).populate(
-        "dermaCategory",
-        "name"
-      );
+      clinic = await Clinic.findById(identifier)
+        .populate("dermaCategory", "name")
+        .populate("clinicServices");
     }
 
     if (!clinic) {
@@ -1017,6 +1018,7 @@ router.put(
       typeof req.body?.doctors !== "undefined"
         ? normalizeDoctors(req.body.doctors)
         : existingClinic.doctors;
+    const parsedClinicServices = parseStringArray(req.body?.clinicServices);
     const parsedRateCard = parseStringArray(req.body?.rateCard);
     const parsedSpecialOffers = parseStringArray(req.body?.specialOffers);
     const parsedPhotos = parseStringArray(req.body?.photos);
@@ -1084,6 +1086,9 @@ router.put(
           : {}),
         slug: nextSlug,
         doctors: parsedDoctors,
+        ...(hasOwn(req.body, "clinicServices")
+          ? { clinicServices: parsedClinicServices }
+          : {}),
         ...(uploadedClinicLogo.length ? { clinicLogo: uploadedClinicLogo[0] } : {}),
         ...(uploadedBannerImage.length ? { bannerImage: uploadedBannerImage[0] } : {}),
         ...(hasOwn(req.body, "rateCard") || uploadedRateCard.length

@@ -12,9 +12,15 @@ export interface IDoctor extends Document {
   address?: string;
   profileImage?: string;
   createdByAdmin: boolean;
+  isActive?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
+
+
+
+
+
 
 const DoctorSchema: Schema = new Schema(
   {
@@ -28,6 +34,7 @@ const DoctorSchema: Schema = new Schema(
     address: { type: String, trim: true },
     profileImage: { type: String },
     createdByAdmin: { type: Boolean, default: true }, // ✅ add this
+    isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

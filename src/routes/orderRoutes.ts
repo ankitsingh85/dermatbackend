@@ -6,6 +6,10 @@ import User from "../models/user";
 import B2BUser from "../models/B2BUser";
 import Clinic from "../models/clinic";
 import ClinicSubscription from "../models/clinicSubscription";
+import Chat from "../models/chat";
+import Message from "../models/message";
+import Doctor from "../models/doctor";
+import OnlineConsultationService from "../models/onlineConsultationService";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
 import { sendMail } from "../utils/email";
 import {
@@ -205,6 +209,8 @@ router.post("/", async (req, res) => {
       razorpayOrderId,
       razorpayPaymentId,
       razorpaySignature,
+      paymentMethod,
+      paymentMethodDetails,
     } = req.body;
 
     if ((!userId && !clinicId && !b2bUserId) || !products || !totalAmount || !address) {
@@ -244,6 +250,8 @@ router.post("/", async (req, res) => {
       razorpayOrderId,
       razorpayPaymentId,
       razorpaySignature,
+      paymentMethod,
+      paymentMethodDetails,
     });
 
     const savedOrder = await order.save();
@@ -680,6 +688,118 @@ router.get("/admin/transactions", async (_req, res) => {
         category,
       };
     });
+
+    // For the admin "Online Consultation" transactions tab — which doctor
+    // the patient actually connected to, when, and the latest prescription
+    // the doctor sent them in that chat. There's no direct order→doctor
+    // link in the data model (the doctor is only resolved at "Connect"
+    // time, matched against the service's doctor pool) — so it's
+    // re-derived the same way: the chat between this patient and any
+    // doctor in the ordered service's pool.
+    const consultationOrders = withCategory.filter((o) => o.category === "consultation");
+    if (consultationOrders.length > 0) {
+      const serviceIds = Array.from(
+        new Set(
+          consultationOrders.flatMap((o: any) =>
+            (o.products || [])
+              .filter((p: any) => p.itemType === "consultation")
+              .map((p: any) => String(p.id))
+          )
+        )
+      );
+
+      const services = serviceIds.length
+        ? await OnlineConsultationService.find({ _id: { $in: serviceIds } }).select("doctors")
+        : [];
+      const serviceDoctorMap = new Map(
+        services.map((s: any) => [String(s._id), (s.doctors || []).map((d: any) => String(d))])
+      );
+      const allDoctorIds = Array.from(
+        new Set(services.flatMap((s: any) => (s.doctors || []).map((d: any) => String(d))))
+      );
+      const userIds = Array.from(
+        new Set(
+          consultationOrders
+            .map((o: any) => String(o.userId?._id || o.userId || ""))
+            .filter(Boolean)
+        )
+      );
+
+      const chats =
+        allDoctorIds.length && userIds.length
+          ? await Chat.find({
+              userId: { $in: userIds },
+              doctorId: { $in: allDoctorIds },
+              status: { $ne: "declined" },
+            })
+          : [];
+
+      const doctorIdsFromChats = Array.from(new Set(chats.map((c) => String(c.doctorId))));
+      const doctors = doctorIdsFromChats.length
+        ? await Doctor.find({ _id: { $in: doctorIdsFromChats } }).select(
+            "title firstName lastName"
+          )
+        : [];
+      const doctorMap = new Map(doctors.map((d: any) => [String(d._id), d]));
+
+      const chatIds = chats.map((c) => String(c._id));
+      const prescriptions = chatIds.length
+        ? await Message.find({
+            chatId: { $in: chatIds },
+            attachmentType: "pdf",
+            attachmentName: { $regex: /^Prescription-/ },
+          }).sort({ createdAt: -1 })
+        : [];
+      const latestPrescriptionByChat = new Map<string, any>();
+      for (const msg of prescriptions) {
+        const key = String(msg.chatId);
+        if (!latestPrescriptionByChat.has(key)) latestPrescriptionByChat.set(key, msg);
+      }
+
+      for (const order of consultationOrders as any[]) {
+        const serviceId = String(
+          (order.products || []).find((p: any) => p.itemType === "consultation")?.id || ""
+        );
+        const doctorPool = serviceDoctorMap.get(serviceId) || [];
+        const orderUserId = String(order.userId?._id || order.userId || "");
+
+        // A patient can end up with more than one chat against the same
+        // service's doctor pool — e.g. they used the doctor picker to
+        // connect with a different doctor on a separate occasion. There's
+        // no per-order link to say which chat "belongs" to which order, so
+        // every matching connection for this user+service is surfaced
+        // rather than arbitrarily picking just one and hiding the rest.
+        const matchedChats = chats
+          .filter((c) => String(c.userId) === orderUserId && doctorPool.includes(String(c.doctorId)))
+          .sort(
+            (a, b) =>
+              new Date(a.requestedAt || (a as any).createdAt || 0).getTime() -
+              new Date(b.requestedAt || (b as any).createdAt || 0).getTime()
+          );
+
+        if (matchedChats.length === 0) continue;
+
+        order.connections = matchedChats.map((chat) => {
+          const doctor = doctorMap.get(String(chat.doctorId));
+          const prescription = latestPrescriptionByChat.get(String(chat._id));
+          return {
+            doctorName: doctor
+              ? [doctor.title, doctor.firstName, doctor.lastName].filter(Boolean).join(" ")
+              : null,
+            connectedAt: chat.requestedAt || (chat as any).createdAt || null,
+            prescriptionUrl: prescription?.attachmentUrl || null,
+            prescriptionDate: prescription?.createdAt || null,
+          };
+        });
+
+        // Flat fields kept for simple consumers (e.g. a quick CSV column) —
+        // the first connection by time.
+        order.connectedDoctor = order.connections[0]?.doctorName || null;
+        order.connectedAt = order.connections[0]?.connectedAt || null;
+        order.prescriptionUrl = order.connections[0]?.prescriptionUrl || null;
+        order.prescriptionDate = order.connections[0]?.prescriptionDate || null;
+      }
+    }
 
     const subscriptionTransactions = await fetchClinicSubscriptionTransactions();
 

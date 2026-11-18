@@ -21,6 +21,22 @@ const chatSchema = new mongoose.Schema(
       default: Date.now,
     },
     respondedAt: Date,
+    // Online-consultation chats only ("direct" doctor-picked chats never
+    // expire or close). "consultation" chats auto-close 7 days after they
+    // were created, or earlier if the doctor closes them manually — once
+    // closed, the chat is read-only: no more messages, attachments,
+    // prescriptions, or calls.
+    source: {
+      type: String,
+      enum: ["direct", "consultation"],
+      default: "direct",
+    },
+    consultationExpiresAt: Date,
+    closedAt: Date,
+    closedBy: {
+      type: String,
+      enum: ["doctor", "system"],
+    },
   },
   { timestamps: true }
 );

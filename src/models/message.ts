@@ -1,5 +1,21 @@
 import mongoose from "mongoose";
 
+const recommendationItemSchema = new mongoose.Schema(
+  {
+    itemType: {
+      type: String,
+      enum: ["product", "treatment"],
+      required: true,
+    },
+    itemId: { type: String, required: true },
+    name: { type: String, required: true },
+    image: String,
+    price: { type: Number, default: 0 },
+    mrp: Number,
+  },
+  { _id: false }
+);
+
 const messageSchema = new mongoose.Schema(
   {
     chatId: {
@@ -11,7 +27,7 @@ const messageSchema = new mongoose.Schema(
     message: String,
     messageType: {
       type: String,
-      enum: ["text", "call"],
+      enum: ["text", "call", "recommendation"],
       default: "text",
     },
     callType: {
@@ -28,6 +44,12 @@ const messageSchema = new mongoose.Schema(
       enum: ["image", "pdf"],
     },
     attachmentName: { type: String },
+    // Doctor-suggested products/treatments, shown to the patient as
+    // "Add to Cart" cards within the chat (messageType: "recommendation").
+    recommendations: {
+      type: [recommendationItemSchema],
+      default: undefined,
+    },
     seen: { type: Boolean, default: false },
   },
   { timestamps: true }

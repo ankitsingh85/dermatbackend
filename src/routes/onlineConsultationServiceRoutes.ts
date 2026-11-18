@@ -10,6 +10,7 @@ import Chat from "../models/chat";
 import upload from "../middleware/uploads";
 import { userAuth, UserAuthRequest } from "../middleware/authUser";
 import { buildDoctorPayload } from "../controllers/DoctorAuthController";
+import { CONSULTATION_WINDOW_MS } from "../utils/chatLifecycle";
 
 const router = express.Router();
 
@@ -618,7 +619,7 @@ router.post("/:id/connect", userAuth, async (req: UserAuthRequest, res: Response
 
     const service = await OnlineConsultationService.findById(id).populate(
       "doctors",
-      "title firstName lastName specialist profileImage isAvailableForConsultation"
+      "title firstName lastName specialist profileImage isAvailableForConsultation isActive"
     );
     if (!service) {
       return res.status(404).json({ message: "Online consultation service not found" });
@@ -635,7 +636,11 @@ router.post("/:id/connect", userAuth, async (req: UserAuthRequest, res: Response
       return res.status(403).json({ message: "Purchase this consultation to connect with a doctor" });
     }
 
-    const assignedDoctors = (service.doctors || []) as any[];
+    // A disabled doctor (admin-disabled account) is never eligible for a
+    // fresh match, picked or auto — even inside an availability window.
+    const assignedDoctors = ((service.doctors || []) as any[]).filter(
+      (doctor) => doctor.isActive !== false
+    );
     const assignedDoctorIds = assignedDoctors.map((doctor) => String(doctor._id));
 
     // Optional: the user picked a specific assigned doctor (e.g. from a
@@ -645,14 +650,18 @@ router.post("/:id/connect", userAuth, async (req: UserAuthRequest, res: Response
       return res.status(400).json({ message: "Selected doctor is not part of this consultation" });
     }
 
-    // Sticky match — reuse an existing active (non-declined) chat so repeat
-    // visits reconnect to the same doctor instead of starting over. Scoped
-    // to the requested doctor when one was picked; otherwise any assigned
-    // doctor. A declined chat is excluded so the user can be rematched.
+    // Sticky match — reuse an existing active (non-declined), not-yet-closed
+    // chat so repeat visits reconnect to the same doctor instead of starting
+    // over. Scoped to the requested doctor when one was picked; otherwise
+    // any assigned doctor. A declined or closed chat is excluded — once a
+    // consultation chat closes (manually or after its 7-day window), the
+    // next "Connect" starts a brand new one rather than reopening it.
     const existingChat = await Chat.findOne({
       userId,
       doctorId: requestedDoctorId ? requestedDoctorId : { $in: assignedDoctorIds },
       status: { $ne: "declined" },
+      closedAt: null,
+      $or: [{ consultationExpiresAt: null }, { consultationExpiresAt: { $gt: new Date() } }],
     });
 
     if (existingChat) {
@@ -664,6 +673,7 @@ router.post("/:id/connect", userAuth, async (req: UserAuthRequest, res: Response
         chatId: existingChat._id,
         chatStatus: existingChat.status,
         doctor: buildDoctorPayload(matchedDoctor),
+        consultationExpiresAt: existingChat.consultationExpiresAt || null,
       });
     }
 
@@ -713,6 +723,8 @@ router.post("/:id/connect", userAuth, async (req: UserAuthRequest, res: Response
       userId,
       status: "accepted",
       respondedAt: new Date(),
+      source: "consultation",
+      consultationExpiresAt: new Date(Date.now() + CONSULTATION_WINDOW_MS),
     });
 
     return res.json({
@@ -720,6 +732,7 @@ router.post("/:id/connect", userAuth, async (req: UserAuthRequest, res: Response
       chatId: chat._id,
       chatStatus: chat.status,
       doctor: buildDoctorPayload(pickedDoctor),
+      consultationExpiresAt: chat.consultationExpiresAt,
     });
   } catch (err: any) {
     console.error("Connect to doctor error:", err);

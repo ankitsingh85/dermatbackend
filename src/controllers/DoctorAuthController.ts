@@ -130,6 +130,13 @@ export const sendDoctorLoginOtp = async (req: Request, res: Response) => {
       });
     }
 
+    if (doctor.isActive === false) {
+      return res.status(403).json({
+        message: "Your account has been disabled. Please contact support.",
+        exists: true,
+      });
+    }
+
     const { sessionId } = await sendTwoFactorOtp(phone);
 
     return res.status(200).json({
@@ -181,6 +188,12 @@ export const doctorMobileLogin = async (req: Request, res: Response) => {
     if (!doctor) {
       return res.status(404).json({
         message: "Doctor is not registered",
+      });
+    }
+
+    if (doctor.isActive === false) {
+      return res.status(403).json({
+        message: "Your account has been disabled. Please contact support.",
       });
     }
 
