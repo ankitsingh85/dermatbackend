@@ -1,7 +1,8 @@
 import express from "express";
 import Chat from "../models/chat";
 import Message from "../models/message";
-import { resolveChatClosure } from "../utils/chatLifecycle";
+import { resolveChatClosure, getDoctorQueue } from "../utils/chatLifecycle";
+import { isDoctorOnCall } from "../utils/callQueue";
 
 const router = express.Router();
 
@@ -175,6 +176,34 @@ router.get("/doctor/:doctorId", async (req, res) => {
     res.json(chats.map(formatChatForDoctor));
   } catch (err: any) {
     console.error("Doctor chat fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 👉 PATIENT: where is my request in this doctor's list of pending requests
+// (first come, first served)? Polled by the patient's chat screen while the
+// request is pending. doctorBusy = the doctor is on a call right now.
+router.get("/:chatId/queue", async (req, res) => {
+  try {
+    const chat: any = await Chat.findById(req.params.chatId);
+    if (!chat) {
+      return res.status(404).json({ error: "Chat request not found." });
+    }
+    await resolveChatClosure(chat);
+
+    const { waiting } = await getDoctorQueue(Chat, chat.doctorId);
+    const index = waiting.findIndex((c: any) => String(c._id) === String(chat._id));
+    const doctorBusy = isDoctorOnCall(String(chat.doctorId));
+
+    res.json({
+      chatId: chat._id,
+      status: chat.status,
+      position: index >= 0 ? index + 1 : null,
+      ahead: index >= 0 ? index : 0,
+      waitingTotal: waiting.length,
+      doctorBusy,
+    });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });

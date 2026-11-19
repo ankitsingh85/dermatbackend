@@ -18,3 +18,24 @@ export const resolveChatClosure = async (chat: any) => {
 };
 
 export const isChatClosed = (chat: any) => Boolean(chat?.closedAt);
+
+// ---------------------------------------------------------------------------
+// Pending chat requests in first-come order (by requestedAt), plus the
+// doctor's open consultations. Doctors can accept any number of chats; only
+// live calls are one-at-a-time (see utils/callQueue.ts).
+// ---------------------------------------------------------------------------
+export const isActiveConsultation = (chat: any) =>
+  chat?.source === "consultation" && chat?.status === "accepted" && !chat?.closedAt;
+
+export const getDoctorQueue = async (ChatModel: any, doctorId: any) => {
+  const chats = await ChatModel.find({
+    doctorId,
+    $or: [{ status: "pending" }, { status: "accepted", source: "consultation", closedAt: null }],
+  }).sort({ requestedAt: 1 });
+
+  await Promise.all(chats.map((chat: any) => resolveChatClosure(chat)));
+
+  const active = chats.filter(isActiveConsultation);
+  const waiting = chats.filter((chat: any) => chat.status === "pending");
+  return { active, waiting };
+};

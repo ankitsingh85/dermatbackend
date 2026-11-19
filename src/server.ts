@@ -55,6 +55,7 @@ import b2bFeaturedSectionRoutes from "./routes/b2bFeaturedSectionRoutes";
 import Chat from "./models/chat";
 import Message from "./models/message";
 import { resolveChatClosure, isChatClosed } from "./utils/chatLifecycle";
+import * as callQueue from "./utils/callQueue";
 import reviewRoutes from "./routes/b2breviewRoute";
 import clinicReviewRoutes from "./routes/clinicReviewRoute";
 // ✅ CHAT ROUTES
@@ -326,12 +327,100 @@ io.on("connection", (socket) => {
     emitToUser(data.to, eventName, data);
   };
 
+  // ---------------- ONE CALL AT A TIME (per doctor) ----------------
+  // See utils/callQueue.ts. A patient calling a doctor who's already ringing
+  // or on another call gets "call:queued" (with their position) instead of
+  // ringing; when that call finishes the next caller is rung automatically.
+
+  const emitQueueUpdates = (doctorId: string) => {
+    const list = callQueue.getQueue(doctorId);
+    list.forEach((q, index) => {
+      emitToUser(q.invite.from, "call:queued", {
+        chatId: q.invite.chatId,
+        callId: q.invite.callId,
+        to: q.invite.from,
+        position: index + 1,
+        ahead: index,
+      });
+    });
+    emitToUser(doctorId, "call:queue_updated", {
+      doctorId,
+      queue: list.map((q, index) => ({
+        position: index + 1,
+        chatId: q.invite.chatId,
+        callId: q.invite.callId,
+        patientId: q.invite.from,
+        callerName: q.invite.callerName || "",
+        callType: q.invite.callType || "video",
+        queuedAt: q.queuedAt,
+      })),
+    });
+  };
+
+  // Rings the doctor for this invite and marks them as busy with it.
+  const ringDoctor = async (doctorId: string, invite: any) => {
+    callQueue.setCurrentCall(doctorId, {
+      callId: invite.callId,
+      chatId: invite.chatId,
+      peerId: invite.from,
+      state: "ringing",
+      // Nobody picked up: free the doctor and move on to the next caller.
+      timer: setTimeout(() => {
+        const current = callQueue.getCurrentCall(doctorId);
+        if (current?.callId !== invite.callId || current.state !== "ringing") return;
+        emitToUser(invite.from, "call:unavailable", { ...invite, to: invite.from, reason: "no-answer" });
+        emitToUser(doctorId, "call:ended", { ...invite, to: doctorId, reason: "no-answer" });
+        finishDoctorCall(doctorId, invite.callId);
+      }, callQueue.RING_TIMEOUT_MS),
+    });
+
+    try {
+      const callMessage = await createCallHistoryMessage(invite);
+      if (callMessage) {
+        emitToUser(invite.from, "receive_message", callMessage);
+        emitToUser(invite.to, "receive_message", callMessage);
+      }
+    } catch (err) {
+      console.error("Call history save error:", err);
+    }
+
+    relayCallSignal("call:invite", invite);
+  };
+
+  // Current call is over: free the doctor and ring the next connected caller.
+  const finishDoctorCall = (doctorId: string, callId?: string) => {
+    const current = callQueue.getCurrentCall(doctorId);
+    if (!current || (callId && current.callId !== callId)) return;
+    callQueue.clearCurrentCall(doctorId);
+
+    let next = callQueue.shiftQueue(doctorId);
+    while (next && !users.has(next.invite.from)) next = callQueue.shiftQueue(doctorId);
+
+    if (next && users.has(doctorId)) {
+      emitToUser(next.invite.from, "call:dequeued", {
+        chatId: next.invite.chatId,
+        callId: next.invite.callId,
+        to: next.invite.from,
+      });
+      ringDoctor(doctorId, next.invite);
+    } else if (next) {
+      // Doctor went offline in the meantime: let everyone waiting know.
+      [next, ...callQueue.getQueue(doctorId)].forEach((q) =>
+        emitToUser(q.invite.from, "call:unavailable", { ...q.invite, to: q.invite.from })
+      );
+      while (callQueue.shiftQueue(doctorId));
+    }
+    emitQueueUpdates(doctorId);
+  };
+
   socket.on("call:invite", async (data) => {
+    let chat: any = null;
+
     // A closed consultation chat (manually ended, or past its 7-day
     // window) can't start a new call any more than it can send a message.
     if (data?.chatId) {
       try {
-        const chat = await Chat.findById(data.chatId);
+        chat = await Chat.findById(data.chatId).populate("userId", "name profileImage");
         if (chat) {
           await resolveChatClosure(chat);
           if (isChatClosed(chat)) {
@@ -361,6 +450,38 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const doctorId = chat?.doctorId ? String(chat.doctorId) : "";
+    const patientCallingDoctor = Boolean(doctorId) && String(data?.to) === doctorId;
+
+    if (patientCallingDoctor) {
+      const invite = {
+        ...data,
+        callerName: chat?.userId?.name || data?.callerName || "",
+        callerImage: chat?.userId?.profileImage || "",
+      };
+      const current = callQueue.getCurrentCall(doctorId);
+
+      if (current && current.callId !== data.callId) {
+        // Doctor is ringing / on another call: wait in line.
+        callQueue.enqueue(doctorId, invite);
+        emitQueueUpdates(doctorId);
+        return;
+      }
+
+      await ringDoctor(doctorId, invite);
+      return;
+    }
+
+    // Doctor calling a patient: the doctor is now on this call.
+    if (doctorId && String(data?.from) === doctorId) {
+      callQueue.setCurrentCall(doctorId, {
+        callId: data.callId,
+        chatId: data.chatId,
+        peerId: data.to,
+        state: "ringing",
+      });
+    }
+
     try {
       const callMessage = await createCallHistoryMessage(data);
 
@@ -374,20 +495,56 @@ io.on("connection", (socket) => {
 
     relayCallSignal("call:invite", data);
   });
-  socket.on("call:accepted", (data) => relayCallSignal("call:accepted", data));
-  socket.on("call:rejected", (data) => relayCallSignal("call:rejected", data));
+
+  socket.on("call:accepted", (data) => {
+    if (data?.callId) callQueue.markConnected(data.callId);
+    relayCallSignal("call:accepted", data);
+  });
+
+  const endOrCancel = (eventName: string, data: any) => {
+    // Caller hung up while still waiting in a queue: just drop them.
+    const queuedFor = data?.callId ? callQueue.removeQueued(data.callId) : null;
+    if (queuedFor) {
+      emitQueueUpdates(queuedFor);
+      return;
+    }
+    relayCallSignal(eventName, data);
+    const doctorId = data?.callId ? callQueue.findDoctorByCallId(data.callId) : null;
+    if (doctorId) finishDoctorCall(doctorId, data.callId);
+  };
+
+  socket.on("call:rejected", (data) => endOrCancel("call:rejected", data));
   socket.on("call:offer", (data) => relayCallSignal("call:offer", data));
   socket.on("call:answer", (data) => relayCallSignal("call:answer", data));
   socket.on("call:ice-candidate", (data) =>
     relayCallSignal("call:ice-candidate", data),
   );
-  socket.on("call:ended", (data) => relayCallSignal("call:ended", data));
+  socket.on("call:ended", (data) => endOrCancel("call:ended", data));
 
   socket.on("disconnect", () => {
     for (const [key, value] of users.entries()) {
       if (value === socket.id) {
         users.delete(key);
         io.emit("presence_offline", { id: key });
+
+        // Screens reconnect when the app moves between chats, so wait a
+        // moment before treating the user's calls / queue spot as abandoned.
+        setTimeout(() => {
+          if (users.has(key)) return;
+          callQueue.removeQueuedByUser(key).forEach((doctorId) => emitQueueUpdates(doctorId));
+          callQueue.callsInvolving(key).forEach((doctorId) => {
+            const current = callQueue.getCurrentCall(doctorId);
+            if (!current) return;
+            const other = doctorId === key ? current.peerId : doctorId;
+            emitToUser(other, "call:ended", {
+              chatId: current.chatId,
+              callId: current.callId,
+              to: other,
+              reason: "disconnected",
+            });
+            finishDoctorCall(doctorId, current.callId);
+          });
+        }, 8000);
       }
     }
   });
