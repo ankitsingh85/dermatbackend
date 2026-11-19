@@ -367,7 +367,7 @@ io.on("connection", (socket) => {
       // Nobody picked up: free the doctor and move on to the next caller.
       timer: setTimeout(() => {
         const current = callQueue.getCurrentCall(doctorId);
-        if (current?.callId !== invite.callId || current.state !== "ringing") return;
+        if (!current || current.callId !== invite.callId || current.state !== "ringing") return;
         emitToUser(invite.from, "call:unavailable", { ...invite, to: invite.from, reason: "no-answer" });
         emitToUser(doctorId, "call:ended", { ...invite, to: doctorId, reason: "no-answer" });
         finishDoctorCall(doctorId, invite.callId);
