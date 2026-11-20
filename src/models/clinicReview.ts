@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IClinicReview extends Document {
   clinicId: string;
+  userId: string;
   name: string;
   rating: number;
   comment: string;
@@ -11,6 +12,13 @@ export interface IClinicReview extends Document {
 const clinicReviewSchema = new Schema<IClinicReview>(
   {
     clinicId: {
+      type: String,
+      required: true,
+    },
+
+    // Stamped from the verified JWT (req.user.id) at submit time — never
+    // trust a client-supplied identity for who posted a review.
+    userId: {
       type: String,
       required: true,
     },

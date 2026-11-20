@@ -22,6 +22,10 @@ export interface IReview {
 
   user: string;
 
+  // Stamped from the verified JWT at submit time — lets us confirm a
+  // purchase and block a second review from the same buyer.
+  userId?: string;
+
   createdAt?: Date;
 
   updatedAt?: Date;
@@ -142,6 +146,10 @@ const ReviewSchema = new Schema<IReview>(
     user: {
       type: String,
       required: true,
+    },
+
+    userId: {
+      type: String,
     },
 
     createdAt: {

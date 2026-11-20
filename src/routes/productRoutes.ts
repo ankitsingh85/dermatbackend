@@ -4,6 +4,9 @@ import * as XLSX from "xlsx";
 import { parseCsvRows } from "../utils/bulkUploadCsv";
 import upload from "../middleware/uploads";
 import Product from "../models/Products";
+import Order from "../models/order";
+import User from "../models/user";
+import { userAuth, UserAuthRequest } from "../middleware/authUser";
 
 const router = express.Router();
 
@@ -1067,14 +1070,30 @@ message:"Deleted"
 
 
 
-/* ================= REVIEW ================= */
+/* ================= REVIEW =================
+   Only a verified purchaser can review a product — checked against their
+   own paid orders via the JWT (req.user.id), never a client-supplied
+   identity — and only once per product. */
 
 
 router.post(
 "/:id/reviews",
 
-async(req,res)=>{
+userAuth,
 
+async(req: UserAuthRequest, res) => {
+
+try {
+
+const userId = req.user?.id;
+if (!userId) {
+  return res.status(401).json({ message: "Please log in to write a review" });
+}
+
+const { rating, comment } = req.body;
+if (!rating || !comment) {
+  return res.status(400).json({ message: "Rating and comment are required" });
+}
 
 const product =
 await Product.findById(
@@ -1091,12 +1110,36 @@ return res
 message:"Not found"
 });
 
+const hasPurchased = await Order.exists({
+  userId,
+  paymentStatus: "success",
+  "products.id": req.params.id,
+});
 
+if (!hasPurchased) {
+  return res.status(403).json({
+    message: "You can only review a product you've purchased.",
+  });
+}
 
-
-product.reviews.push(
-req.body
+const alreadyReviewed = product.reviews.some(
+  (review) => review.userId === userId
 );
+if (alreadyReviewed) {
+  return res.status(409).json({ message: "You have already reviewed this product" });
+}
+
+const user = await User.findById(userId).select("name");
+if (!user) {
+  return res.status(401).json({ message: "User not found" });
+}
+
+product.reviews.push({
+  rating,
+  comment,
+  user: user.name,
+  userId,
+});
 
 
 
@@ -1118,7 +1161,9 @@ await product.save();
 
 res.json(product);
 
-
+} catch (err: any) {
+  res.status(500).json({ message: "Failed to submit review", error: err.message });
+}
 
 }
 
